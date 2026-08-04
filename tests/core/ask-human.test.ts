@@ -1,0 +1,218 @@
+import { describe, expect, test } from 'bun:test';
+import { askHuman } from '../../src/core/ask-human.ts';
+import { LoopbackChannel, LoopbackStt, LoopbackTts } from '../../src/channels/loopback.ts';
+import { settingsSchema, type Settings } from '../../src/settings/schema.ts';
+import type { AskDeps } from '../../src/core/ask-human.ts';
+import type { LoopbackScript } from '../../src/channels/loopback.ts';
+import type {
+  AskRequest,
+  AudioData,
+  ChannelCapabilities,
+  ChannelSession,
+  CommunicationChannel,
+} from '../../src/types/index.ts';
+
+function mockSettings(overrides: Record<string, unknown> = {}): Settings {
+  return settingsSchema.parse({
+    discord: {
+      botToken: 'bot-token',
+      guildId: 'guild-id',
+      textChannelId: 'text-channel-id',
+      voiceChannelId: 'voice-channel-id',
+      userId: 'user-id',
+    },
+    elevenlabs: {
+      apiKey: 'api-key',
+      voiceId: 'voice-id',
+    },
+    ...overrides,
+  });
+}
+
+function makeDeps(script: { pickUp: boolean; utterances: Array<string | null> }): {
+  channel: LoopbackChannel;
+  deps: AskDeps;
+} {
+  const channel = new LoopbackChannel(script);
+  const deps: AskDeps = { channel, tts: new LoopbackTts(), stt: new LoopbackStt() };
+  return { channel, deps };
+}
+
+describe('askHuman — happy path', () => {
+  test('pickup, answer, confirm yes -> answered', async () => {
+    const { channel, deps } = makeDeps({ pickUp: true, utterances: ['four', 'yes'] });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(true);
+    expect(result.answer).toBe('four');
+    expect(result.status).toBe('answered');
+    expect(result.channel).toBe('loopback');
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(channel.lastSession?.hungUp).toBe(true);
+    expect(channel.lastSession?.spokenTexts[0]).toBe('what is 2+2?');
+    expect(channel.lastSession?.spokenTexts[1]).toBe(
+      'I heard: "four" — is that correct? Please answer yes or no.',
+    );
+  });
+});
+
+describe('askHuman — no pickup', () => {
+  test('human never joins -> no_pickup', async () => {
+    const { channel, deps } = makeDeps({ pickUp: false, utterances: [] });
+
+    const result = await askHuman('anyone there?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(false);
+    expect(result.answer).toBeNull();
+    expect(result.status).toBe('no_pickup');
+    expect(channel.lastSession?.hungUp).toBe(true);
+  });
+});
+
+describe('askHuman — total silence', () => {
+  test('no speech at all -> no_speech', async () => {
+    const { channel, deps } = makeDeps({ pickUp: true, utterances: [null] });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(false);
+    expect(result.answer).toBeNull();
+    expect(result.status).toBe('no_speech');
+    expect(channel.lastSession?.hungUp).toBe(true);
+  });
+});
+
+describe('askHuman — confirm says no, then re-answer, then yes', () => {
+  test('resolves with the second transcript', async () => {
+    const { channel, deps } = makeDeps({
+      pickUp: true,
+      utterances: ['four', 'no', 'five', 'yes'],
+    });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(true);
+    expect(result.answer).toBe('five');
+    expect(result.status).toBe('answered');
+    expect(channel.lastSession?.spokenTexts).toEqual([
+      'what is 2+2?',
+      'I heard: "four" — is that correct? Please answer yes or no.',
+      'Okay, please repeat your answer.',
+      'I heard: "five" — is that correct? Please answer yes or no.',
+    ]);
+  });
+});
+
+describe('askHuman — silence during confirm exhausts rounds', () => {
+  test('never confirms -> not_confirmed', async () => {
+    const { channel, deps } = makeDeps({
+      pickUp: true,
+      utterances: ['four', null, null, null],
+    });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(false);
+    expect(result.answer).toBeNull();
+    expect(result.status).toBe('not_confirmed');
+    expect(channel.lastSession?.hungUp).toBe(true);
+    // one confirm prompt per round (default confirmRounds = 3), same transcript re-confirmed each time
+    expect(channel.lastSession?.spokenTexts).toEqual([
+      'what is 2+2?',
+      'I heard: "four" — is that correct? Please answer yes or no.',
+      'I heard: "four" — is that correct? Please answer yes or no.',
+      'I heard: "four" — is that correct? Please answer yes or no.',
+    ]);
+  });
+});
+
+describe('askHuman — affirmative word-boundary matching', () => {
+  test('"yesterday" must not match "yes"', async () => {
+    const { channel, deps } = makeDeps({
+      pickUp: true,
+      utterances: ['four', 'yesterday', 'yes', 'yes'],
+    });
+
+    const result = await askHuman('what day is it?', mockSettings(), undefined, deps);
+
+    // "yesterday" should NOT confirm "four"; it is treated as a negative/other reply,
+    // triggering a repeat, whose new answer ("yes") is then confirmed by the final "yes".
+    expect(result.answered).toBe(true);
+    expect(result.answer).toBe('yes');
+    expect(result.status).toBe('answered');
+    expect(channel.lastSession?.spokenTexts).toEqual([
+      'what day is it?',
+      'I heard: "four" — is that correct? Please answer yes or no.',
+      'Okay, please repeat your answer.',
+      'I heard: "yes" — is that correct? Please answer yes or no.',
+    ]);
+  });
+});
+
+describe('askHuman — channel throws mid-call', () => {
+  class ThrowingSession implements ChannelSession {
+    constructor(private readonly inner: ChannelSession) {}
+    async ring(): Promise<void> {
+      await this.inner.ring();
+    }
+    async waitForHuman(timeoutMs: number): Promise<boolean> {
+      return this.inner.waitForHuman(timeoutMs);
+    }
+    async speak(_audio: AudioData): Promise<void> {
+      throw new Error('boom: channel exploded mid-call');
+    }
+    async listen(opts: { silenceMs: number; maxMs: number }): Promise<AudioData | null> {
+      return this.inner.listen(opts);
+    }
+    async hangUp(): Promise<void> {
+      await this.inner.hangUp();
+    }
+  }
+
+  class ThrowingChannel implements CommunicationChannel {
+    readonly name = 'throwing';
+    readonly capabilities: ChannelCapabilities = { outbound: true, inbound: false };
+    readonly inner: LoopbackChannel;
+    private lastThrowingSession: ThrowingSession | undefined;
+
+    constructor(script: LoopbackScript) {
+      this.inner = new LoopbackChannel(script);
+    }
+
+    async createSession(req: AskRequest): Promise<ChannelSession> {
+      const innerSession = await this.inner.createSession(req);
+      this.lastThrowingSession = new ThrowingSession(innerSession);
+      return this.lastThrowingSession;
+    }
+  }
+
+  test('exception is caught, hangUp still runs, status is error', async () => {
+    const channel = new ThrowingChannel({ pickUp: true, utterances: ['four'] });
+    const deps: AskDeps = { channel, tts: new LoopbackTts(), stt: new LoopbackStt() };
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(false);
+    expect(result.answer).toBeNull();
+    expect(result.status).toBe('error');
+    expect(result.channel).toBe('throwing');
+    expect(channel.inner.lastSession?.hungUp).toBe(true);
+  });
+});
+
+describe('askHuman — opts override settings', () => {
+  test('confirmRounds: 1 exhausts before the third scripted confirmation', async () => {
+    const { deps } = makeDeps({
+      pickUp: true,
+      utterances: ['four', 'no', 'five', 'yes'],
+    });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), { confirmRounds: 1 }, deps);
+
+    // With confirmRounds: 3 (default) this same script resolves to answered "five" (see above).
+    // With confirmRounds: 1, only one round runs, so it exhausts before the final "yes" is reached.
+    expect(result.answered).toBe(false);
+    expect(result.status).toBe('not_confirmed');
+  });
+});
