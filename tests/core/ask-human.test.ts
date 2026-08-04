@@ -50,10 +50,44 @@ describe('askHuman — happy path', () => {
     expect(result.channel).toBe('loopback');
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(channel.lastSession?.hungUp).toBe(true);
+    expect(channel.lastSession?.rang).toBe(true);
+    expect(channel.lastSession?.ringCount).toBe(1);
     expect(channel.lastSession?.spokenTexts[0]).toBe('what is 2+2?');
     expect(channel.lastSession?.spokenTexts[1]).toBe(
       'I heard: "four" — is that correct? Please answer yes or no.',
     );
+  });
+
+  test('ring() happens before waitForHuman is asked to resolve pickup', async () => {
+    const order: string[] = [];
+    const { deps } = makeDeps({ pickUp: true, utterances: ['four', 'yes'] });
+    const innerSession = await deps.channel.createSession({ question: 'q' });
+    const orderedSession: ChannelSession = {
+      ring: async () => {
+        order.push('ring');
+        await innerSession.ring();
+      },
+      waitForHuman: async (timeoutMs) => {
+        order.push('waitForHuman');
+        return innerSession.waitForHuman(timeoutMs);
+      },
+      speak: (audio) => innerSession.speak(audio),
+      listen: (opts) => innerSession.listen(opts),
+      hangUp: () => innerSession.hangUp(),
+    };
+    const orderedChannel: CommunicationChannel = {
+      name: 'ordered',
+      capabilities: { outbound: true, inbound: false },
+      createSession: async () => orderedSession,
+    };
+
+    await askHuman('what is 2+2?', mockSettings(), undefined, {
+      channel: orderedChannel,
+      tts: new LoopbackTts(),
+      stt: new LoopbackStt(),
+    });
+
+    expect(order).toEqual(['ring', 'waitForHuman']);
   });
 });
 
@@ -151,16 +185,27 @@ describe('askHuman — affirmative word-boundary matching', () => {
 });
 
 describe('askHuman — channel throws mid-call', () => {
+  type FailOn = 'ring' | 'speak';
+
   class ThrowingSession implements ChannelSession {
-    constructor(private readonly inner: ChannelSession) {}
+    constructor(
+      private readonly inner: ChannelSession,
+      private readonly failOn: FailOn,
+    ) {}
     async ring(): Promise<void> {
+      if (this.failOn === 'ring') {
+        throw new Error('boom: ring exploded mid-call');
+      }
       await this.inner.ring();
     }
     async waitForHuman(timeoutMs: number): Promise<boolean> {
       return this.inner.waitForHuman(timeoutMs);
     }
-    async speak(_audio: AudioData): Promise<void> {
-      throw new Error('boom: channel exploded mid-call');
+    async speak(audio: AudioData): Promise<void> {
+      if (this.failOn === 'speak') {
+        throw new Error('boom: channel exploded mid-call');
+      }
+      await this.inner.speak(audio);
     }
     async listen(opts: { silenceMs: number; maxMs: number }): Promise<AudioData | null> {
       return this.inner.listen(opts);
@@ -176,19 +221,35 @@ describe('askHuman — channel throws mid-call', () => {
     readonly inner: LoopbackChannel;
     private lastThrowingSession: ThrowingSession | undefined;
 
-    constructor(script: LoopbackScript) {
+    constructor(
+      script: LoopbackScript,
+      private readonly failOn: FailOn,
+    ) {
       this.inner = new LoopbackChannel(script);
     }
 
     async createSession(req: AskRequest): Promise<ChannelSession> {
       const innerSession = await this.inner.createSession(req);
-      this.lastThrowingSession = new ThrowingSession(innerSession);
+      this.lastThrowingSession = new ThrowingSession(innerSession, this.failOn);
       return this.lastThrowingSession;
     }
   }
 
-  test('exception is caught, hangUp still runs, status is error', async () => {
-    const channel = new ThrowingChannel({ pickUp: true, utterances: ['four'] });
+  test('speak() throws -> exception is caught, hangUp still runs, status is error', async () => {
+    const channel = new ThrowingChannel({ pickUp: true, utterances: ['four'] }, 'speak');
+    const deps: AskDeps = { channel, tts: new LoopbackTts(), stt: new LoopbackStt() };
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.answered).toBe(false);
+    expect(result.answer).toBeNull();
+    expect(result.status).toBe('error');
+    expect(result.channel).toBe('throwing');
+    expect(channel.inner.lastSession?.hungUp).toBe(true);
+  });
+
+  test('ring() throws -> exception is caught, hangUp still runs, status is error', async () => {
+    const channel = new ThrowingChannel({ pickUp: true, utterances: ['four'] }, 'ring');
     const deps: AskDeps = { channel, tts: new LoopbackTts(), stt: new LoopbackStt() };
 
     const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);

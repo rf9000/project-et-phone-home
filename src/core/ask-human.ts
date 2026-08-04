@@ -36,8 +36,10 @@ function isAffirmative(reply: string, affirmativeWords: string[]): boolean {
 }
 
 /**
- * Channel-agnostic call flow: ring, wait for pickup, speak the question, listen for an
- * answer, then run a confirm loop until the human affirms the transcript or rounds run out.
+ * Channel-agnostic call flow: createSession, ring, wait for pickup, speak the question,
+ * listen for an answer, then run a confirm loop until the human affirms the transcript or
+ * rounds run out. ring() notifies the human a question is waiting (e.g. Discord text
+ * mention) and must happen before waitForHuman, or real calls will always time out.
  * Pure function: deps are required (no default wiring yet). Always resolves — never rejects —
  * except for configuration errors thrown before a session exists.
  */
@@ -63,6 +65,7 @@ export async function askHuman(
   let answer: string | null = null;
 
   try {
+    await session.ring();
     const pickedUp = await session.waitForHuman(joinTimeoutMs);
 
     if (!pickedUp) {

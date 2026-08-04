@@ -43,6 +43,10 @@ export class LoopbackSession implements ChannelSession {
   readonly spokenTexts: string[] = [];
   /** Whether hangUp() has been called. */
   hungUp = false;
+  /** Whether ring() has been called. */
+  rang = false;
+  /** How many times ring() has been called. */
+  ringCount = 0;
 
   private readonly script: LoopbackScript;
   private readonly remainingUtterances: Array<string | null>;
@@ -53,7 +57,8 @@ export class LoopbackSession implements ChannelSession {
   }
 
   async ring(): Promise<void> {
-    // no-op
+    this.rang = true;
+    this.ringCount += 1;
   }
 
   async waitForHuman(_timeoutMs: number): Promise<boolean> {

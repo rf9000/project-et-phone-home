@@ -42,6 +42,21 @@ describe('LoopbackChannel', () => {
     expect(await sessionB.waitForHuman(1000)).toBe(false);
   });
 
+  test('ring records rang and ringCount', async () => {
+    const channel = new LoopbackChannel({ pickUp: true, utterances: [] });
+    const session = await channel.createSession({ question: 'q' });
+
+    expect(channel.lastSession?.rang).toBe(false);
+    expect(channel.lastSession?.ringCount).toBe(0);
+
+    await session.ring();
+    expect(channel.lastSession?.rang).toBe(true);
+    expect(channel.lastSession?.ringCount).toBe(1);
+
+    await session.ring();
+    expect(channel.lastSession?.ringCount).toBe(2);
+  });
+
   test('speak records spokenTexts, listen shifts utterances, hangUp records hungUp', async () => {
     const channel = new LoopbackChannel({ pickUp: true, utterances: ['four', null, 'five'] });
     const session = await channel.createSession({ question: 'what is 2+2?' });
