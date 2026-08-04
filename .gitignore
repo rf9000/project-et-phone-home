@@ -6,3 +6,4 @@ coverage/
 .state/
 .cache/
 .DS_Store
+scratch/
