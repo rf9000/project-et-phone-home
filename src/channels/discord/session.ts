@@ -16,7 +16,7 @@ import type { Client, Guild, VoiceState } from 'discord.js';
 import prism from 'prism-media';
 import type { AskRequest, AudioData, ChannelSession } from '../../types/index.ts';
 import { DISCORD_CHANNELS, DISCORD_SAMPLE_RATE, fromDiscordCapture, toDiscordPlayable } from './audio.ts';
-import { formatRingMessage, isTargetUserInChannel, playbackTimeoutMs } from './helpers.ts';
+import { closeStream, formatRingMessage, isTargetUserInChannel, playbackTimeoutMs } from './helpers.ts';
 
 /** How long the voice websocket/UDP handshake may take before we give up. */
 const VOICE_READY_TIMEOUT_MS = 20_000;
@@ -24,6 +24,8 @@ const VOICE_READY_TIMEOUT_MS = 20_000;
 const PLAYBACK_START_TIMEOUT_MS = 5_000;
 /** Opus frame size for 20 ms of 48 kHz audio. */
 const OPUS_FRAME_SIZE = 960;
+/** How long a spent subscription gets to release its receiver slot before we give up on it. */
+const STALE_CLOSE_TIMEOUT_MS = 250;
 
 export interface DiscordSessionOptions {
   /** A logged-in, ready discord.js client owned by this session (destroyed on hangUp). */
@@ -289,18 +291,25 @@ export class DiscordSession implements ChannelSession {
    * ends the stream after silenceMs, the decoder errors, or the maxMs hard cap fires — whichever
    * comes first. Always tears both streams down and resolves with whatever was captured.
    */
-  private captureUtterance(receiver: VoiceReceiver, opts: { silenceMs: number; maxMs: number }): Promise<Buffer> {
-    // subscribe() hands back an existing subscription for the same user, which would be a
-    // spent (destroyed) stream from a previous turn; drop it so every listen() starts fresh.
+  private async captureUtterance(
+    receiver: VoiceReceiver,
+    opts: { silenceMs: number; maxMs: number },
+  ): Promise<Buffer> {
+    // subscribe() hands back the existing subscription for the same user, which would be a spent
+    // stream from a previous turn. Close it and wait for the receiver's own 'close' handler to
+    // release the registry slot — deleting the entry ourselves instead would leave that pending
+    // handler to evict the fresh subscription created below (it deletes by user id, not identity).
     const stale = receiver.subscriptions.get(this.userId);
-    if (stale !== undefined) {
-      destroyStream(stale);
-      receiver.subscriptions.delete(this.userId);
-    }
+    if (stale !== undefined) await closeStream(stale, STALE_CLOSE_TIMEOUT_MS);
 
     const opusStream = receiver.subscribe(this.userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: opts.silenceMs },
     });
+
+    // Only reachable if the spent stream never released its slot within the guard window; there is
+    // nothing to capture from it, so report an empty turn rather than stalling until maxMs.
+    if (opusStream.destroyed) return Buffer.alloc(0);
+
     const decoder = new prism.opus.Decoder({
       rate: DISCORD_SAMPLE_RATE,
       channels: DISCORD_CHANNELS,

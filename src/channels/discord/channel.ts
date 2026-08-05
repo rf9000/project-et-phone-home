@@ -17,6 +17,8 @@ export type DiscordConfig = Settings['discord'];
 export interface DiscordChannelDeps {
   /** Injectable client factory so tests can supply a fake instead of a real gateway client. */
   clientFactory?: () => Client;
+  /** Overrides the login+READY deadline; exists so tests do not have to wait 30 s. */
+  readyTimeoutMs?: number;
 }
 
 interface ReadyGate {
@@ -36,10 +38,13 @@ function createDefaultClient(): Client {
 }
 
 /**
- * Arms the READY/error/timeout race *before* login is attempted. Cancelling instead of rejecting
- * on the caller's error path means a failed login can never leave an unhandled rejection behind.
+ * Arms the READY/error/timeout race *before* login is attempted, so no READY event can be missed.
+ * The gate may well reject before anything awaits it — the deadline can expire while `login()` is
+ * still pending on a hung gateway — so a no-op handler is attached the moment it is armed;
+ * an unhandled rejection would otherwise terminate the process under Bun. Attaching that handler
+ * does not consume the rejection: whoever awaits the same promise later still observes it.
  */
-function armReadyGate(client: Client): ReadyGate {
+function armReadyGate(client: Client, timeoutMs: number): ReadyGate {
   let cancel = (): void => {};
 
   const promise = new Promise<void>((resolve, reject) => {
@@ -61,31 +66,39 @@ function armReadyGate(client: Client): ReadyGate {
 
     const timer = setTimeout(() => {
       detach();
-      reject(new Error(`Discord client did not become ready within ${READY_TIMEOUT_MS} ms.`));
-    }, READY_TIMEOUT_MS);
+      reject(new Error(`Discord client did not become ready within ${timeoutMs} ms.`));
+    }, timeoutMs);
 
     client.once(Events.ClientReady, onReady);
     client.once(Events.Error, onError);
     cancel = detach;
   });
 
+  promise.catch(() => {
+    // Armed means handled; see the doc comment above.
+  });
+
   return { promise, cancel };
 }
 
-async function loginAndWaitReady(client: Client, botToken: string): Promise<void> {
+async function loginAndWaitReady(client: Client, botToken: string, timeoutMs: number): Promise<void> {
   if (client.isReady()) return;
 
-  const gate = armReadyGate(client);
+  const gate = armReadyGate(client, timeoutMs);
 
   try {
-    try {
-      await client.login(botToken);
-    } catch (error) {
-      // The token itself is never echoed — only the library's own message is chained as the cause.
-      throw new Error('Discord login failed; check settings.discord.botToken.', { cause: error });
-    }
+    const login = client.login(botToken).then(
+      () => undefined,
+      (error: unknown) => {
+        // The token itself is never echoed — only the library's own message is chained as the cause.
+        throw new Error('Discord login failed; check settings.discord.botToken.', { cause: error });
+      },
+    );
 
-    await gate.promise;
+    // Rejects as soon as either side fails and resolves only when both succeed. Racing them this
+    // way is what surfaces a READY timeout that fires while login() is still pending, and it keeps
+    // a handler attached to whichever promise settles second so its result is never orphaned.
+    await Promise.all([login, gate.promise]);
   } finally {
     gate.cancel();
   }
@@ -132,7 +145,7 @@ export class DiscordChannel implements CommunicationChannel {
     const client = this.deps.clientFactory?.() ?? createDefaultClient();
 
     try {
-      await loginAndWaitReady(client, this.cfg.botToken);
+      await loginAndWaitReady(client, this.cfg.botToken, this.deps.readyTimeoutMs ?? READY_TIMEOUT_MS);
       await this.validateTargets(client);
 
       return new DiscordSession({

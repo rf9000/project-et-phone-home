@@ -40,3 +40,46 @@ export function formatRingMessage(opts: { userId: string; question: string; voic
 export function playbackTimeoutMs(byteLength: number): number {
   return Math.ceil(byteLength / DISCORD_PCM_BYTES_PER_MS) + PLAYBACK_SLACK_MS;
 }
+
+/** Minimal structural view of a Node stream that can be destroyed and emits 'close'. */
+export interface ClosableStream {
+  readonly destroyed: boolean;
+  destroy: () => void;
+  once: (event: 'close', listener: () => void) => unknown;
+  off: (event: 'close', listener: () => void) => unknown;
+}
+
+/**
+ * Destroys a stream and waits for its 'close' to actually be delivered, giving up after
+ * timeoutMs so a stream that never closes cannot wedge the caller.
+ *
+ * Waiting is the point. @discordjs/voice removes a voice subscription from its per-user
+ * registry inside that stream's own 'close' handler, keyed by user id with no identity check —
+ * so a 'close' delivered after a re-subscribe would evict the *new* subscription and silently
+ * swallow every packet of that turn. Letting the old handler run first avoids that entirely.
+ */
+export function closeStream(stream: ClosableStream, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      stream.off('close', finish);
+      resolve();
+    };
+
+    // Listener first: destroy() can schedule 'close' immediately.
+    stream.once('close', finish);
+
+    try {
+      if (!stream.destroyed) stream.destroy();
+    } catch {
+      // A stream that refuses to be destroyed must not break the call; the timer still fires.
+    }
+
+    timer = setTimeout(finish, timeoutMs);
+  });
+}
