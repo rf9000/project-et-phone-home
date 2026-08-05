@@ -144,7 +144,7 @@ function usage(): string {
     '  et-phone-home help                Show this help',
     '',
     'Flags:',
-    '  --json               Print the full HumanResponse as JSON instead of plain text',
+    '  --json                Print the full HumanResponse as JSON instead of plain text',
     '  --config <path>       Path to a JSON settings file (overrides env vars)',
     '  --timeout <seconds>   Seconds to wait for pickup (overrides call.joinTimeoutMs)',
     '',

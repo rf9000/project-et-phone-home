@@ -104,9 +104,11 @@ export function resolveSettings(sources: SettingsSources = {}): Settings {
   if (sources.filePath !== undefined) {
     const raw = fs.readFileSync(sources.filePath, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    if (isPlainObject(parsed)) {
-      merged = deepMerge(merged, parsed);
+    if (!isPlainObject(parsed)) {
+      const type = Array.isArray(parsed) ? 'array' : parsed === null ? 'null' : typeof parsed;
+      throw new Error(`Config file must contain a JSON object, got ${type}: ${sources.filePath}`);
     }
+    merged = deepMerge(merged, parsed);
   }
 
   if (sources.object !== undefined && isPlainObject(sources.object)) {

@@ -101,4 +101,18 @@ describe('ElevenLabsStt', () => {
     const audio: AudioData = { pcm: Buffer.from([1, 2, 3, 4]), sampleRate: 48000, channels: 1 };
     await expect(stt.transcribe(audio)).rejects.toThrow(SpeechApiError);
   });
+
+  test('throws SpeechApiError when the response body has no string "text" field', async () => {
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ error: 'no speech detected' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    const stt = new ElevenLabsStt({ apiKey: 'test-key', model: 'scribe_v1' }, { fetchFn, retryDelaysMs: [0, 0, 0] });
+
+    const audio: AudioData = { pcm: Buffer.from([1, 2, 3, 4]), sampleRate: 48000, channels: 1 };
+    await expect(stt.transcribe(audio)).rejects.toThrow(SpeechApiError);
+    await expect(stt.transcribe(audio)).rejects.toThrow(/missing a string "text" field/);
+  });
 });

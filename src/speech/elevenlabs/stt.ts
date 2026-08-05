@@ -1,4 +1,4 @@
-import { fetchWithRetry } from '../http.ts';
+import { fetchWithRetry, SpeechApiError } from '../http.ts';
 import { pcmToWav } from '../wav.ts';
 import type { AudioData, SpeechToText } from '../../types/index.ts';
 
@@ -43,6 +43,11 @@ export class ElevenLabsStt implements SpeechToText {
     );
 
     const json = (await response.json()) as SpeechToTextResponse;
+    if (typeof json.text !== 'string') {
+      throw new SpeechApiError(
+        `ElevenLabs speech-to-text response is missing a string "text" field, got: ${JSON.stringify(json)}`,
+      );
+    }
     return json.text;
   }
 }

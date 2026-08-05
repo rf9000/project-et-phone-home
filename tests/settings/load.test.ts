@@ -94,6 +94,42 @@ describe('resolveSettings — file precedence over env', () => {
     const settings = resolveSettings({ env: baseEnv() });
     expect(settings.discord.botToken).toBe('bot-token');
   });
+
+  test('throws a clear error when the config file root is a JSON array', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'etph-settings-'));
+    const filePath = path.join(dir, 'settings.json');
+    fs.writeFileSync(filePath, JSON.stringify([1, 2, 3]));
+
+    expect(() => resolveSettings({ env: baseEnv(), filePath })).toThrow(
+      `Config file must contain a JSON object, got array: ${filePath}`,
+    );
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('throws a clear error when the config file root is a JSON string', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'etph-settings-'));
+    const filePath = path.join(dir, 'settings.json');
+    fs.writeFileSync(filePath, JSON.stringify('not an object'));
+
+    expect(() => resolveSettings({ env: baseEnv(), filePath })).toThrow(
+      `Config file must contain a JSON object, got string: ${filePath}`,
+    );
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('throws a clear error when the config file root is JSON null', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'etph-settings-'));
+    const filePath = path.join(dir, 'settings.json');
+    fs.writeFileSync(filePath, JSON.stringify(null));
+
+    expect(() => resolveSettings({ env: baseEnv(), filePath })).toThrow(
+      `Config file must contain a JSON object, got null: ${filePath}`,
+    );
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe('resolveSettings — object precedence over file and env', () => {

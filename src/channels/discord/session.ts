@@ -117,13 +117,16 @@ export class DiscordSession implements ChannelSession {
       );
     }
 
-    await channel.send(
-      formatRingMessage({
+    await channel.send({
+      content: formatRingMessage({
         userId: this.userId,
         question: this.request.question,
         voiceChannelId: this.voiceChannelId,
       }),
-    );
+      // The question text is arbitrary and may contain @everyone/@here/role mentions; restrict
+      // the ping to the one human this call is actually for.
+      allowedMentions: { users: [this.userId] },
+    });
   }
 
   /**
