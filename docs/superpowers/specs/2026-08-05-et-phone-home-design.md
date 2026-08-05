@@ -164,19 +164,26 @@ scheduled meeting than a phone ring, and it is why `capabilities.inbound` is `fa
 channel: the bot can only place outbound asks, never receive an unsolicited voice connection
 from the human (that requires a persistent gateway connection — see Future work).
 
-**Bun/opusscript constraint.** A throwaway feasibility spike (`scratch/spike-voice-offline.ts`)
-verified the Discord voice dependency stack — `discord.js`, `@discordjs/voice`, opus
-encode/decode, the sodium encryption library, and DAVE E2EE — under Bun on Windows before any
-production code was written. The spike's fallback chain (try `@discordjs/opus`'s native N-API
-addon first, fall back to `prism-media`'s own wrapper, fall back to `opusscript`, a pure
-JS/WASM opus binding with no native binary to load) is why the project depends on both
-`@discordjs/opus` **and** `opusscript`: the native addon is the fast path, and `opusscript` is
-kept installed as the pure-JS fallback `prism-media` reaches for if the native addon's binding
-fails to load in a given Bun/OS/architecture combination. `session.ts` itself only calls into
-`prism-media`'s `opus.Decoder` (for incoming audio) and hands raw PCM to `@discordjs/voice`'s
-`createAudioResource` with `StreamType.Raw` (for outgoing audio) — it never talks to an opus
-library directly, so whichever backend `prism-media` resolves to is transparent to the session
-code.
+**Bun/opusscript constraint.** A throwaway feasibility spike (`scratch/spike-voice-offline.ts`,
+recorded in `task-0a-report.md`) verified the Discord voice dependency stack — `discord.js`,
+`@discordjs/voice`, opus encode/decode, the sodium encryption library, and DAVE E2EE — under Bun
+on Windows before any production code was written. On that tested runtime, `@discordjs/opus`'s
+native N-API addon **does not load at all**: it fails deterministically with a Node-ABI-version
+mismatch (Bun reports `process.versions.modules = 137`; the package's prebuild packaging ships/
+resolves the `node-v127` binary instead, and no matching `node-v137` prebuild exists), not an
+occasional or environment-flaky failure. `opusscript` — a pure JS/WASM opus codec with no native
+binary to load — is the only proven-working opus path on Bun/Windows, and it is what carries
+**all** opus traffic in this project today via `prism-media`'s own loader, which falls through to
+it automatically once it finds the native addon unusable. `opusscript`'s WASM encode/decode has
+different CPU and latency characteristics than the native codec would; that overhead was not
+benchmarked beyond a single-frame roundtrip in the spike. The native addon remains a possible
+faster path only under Node (where the same spike verified it loads and works with zero
+workarounds) or under a future Bun release / `@discordjs/opus` prebuild matrix that closes the
+ABI gap — re-run the spike to re-verify before assuming either has changed. `session.ts` itself
+only calls into `prism-media`'s `opus.Decoder` (for incoming audio) and hands raw PCM to
+`@discordjs/voice`'s `createAudioResource` with `StreamType.Raw` (for outgoing audio) — it never
+talks to an opus library directly, so whichever backend `prism-media` resolves to is transparent
+to the session code.
 
 ## Future work
 
