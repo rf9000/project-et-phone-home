@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "description": "Call a human from your agent workflow: voice question via Discord, spoken answer back as text.",
   "type": "module",
-  "module": "src/cli/index.ts",
+  "module": "src/index.ts",
+  "bin": {
+    "et-phone-home": "src/cli/index.ts"
+  },
   "scripts": {
     "test": "bun test --preload ./tests/setup.ts tests/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ask": "bun run src/cli/index.ts ask"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
