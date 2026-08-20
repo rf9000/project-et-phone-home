@@ -49,6 +49,7 @@ describe('settingsSchema', () => {
         maxListenMs: 60000,
         confirmRounds: 3,
         affirmativeWords: ['yes', 'yeah', 'yep', 'correct', 'right', 'ja'],
+        debugAudioDir: '',
       });
       expect(result.data.channel).toBe('discord');
     }
@@ -91,6 +92,7 @@ describe('settingsFields', () => {
         'call.maxListenMs',
         'call.confirmRounds',
         'call.affirmativeWords',
+        'call.debugAudioDir',
         'channel',
       ].sort(),
     );

@@ -50,6 +50,12 @@ export const settingsSchema = z.object({
         .array(z.string())
         .default(['yes', 'yeah', 'yep', 'correct', 'right', 'ja'])
         .describe('Words treated as an affirmative confirmation from the human.'),
+      debugAudioDir: z
+        .string()
+        .default('')
+        .describe(
+          'Directory where each captured utterance is saved as a WAV file for debugging. Empty disables saving.',
+        ),
     })
     .default({
       joinTimeoutMs: 120000,
@@ -57,6 +63,7 @@ export const settingsSchema = z.object({
       maxListenMs: 60000,
       confirmRounds: 3,
       affirmativeWords: ['yes', 'yeah', 'yep', 'correct', 'right', 'ja'],
+      debugAudioDir: '',
     })
     .describe('Call flow behavior settings.'),
   channel: z

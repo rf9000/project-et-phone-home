@@ -19,6 +19,8 @@ export type { ElevenLabsTtsConfig, ElevenLabsTtsDeps } from './speech/elevenlabs
 export { ElevenLabsStt } from './speech/elevenlabs/stt.ts';
 export type { ElevenLabsSttConfig, ElevenLabsSttDeps } from './speech/elevenlabs/stt.ts';
 
+export { DumpingStt } from './speech/debug.ts';
+
 export { DiscordChannel } from './channels/discord/channel.ts';
 export type { DiscordChannelDeps, DiscordConfig } from './channels/discord/channel.ts';
 
@@ -29,6 +31,7 @@ import type { Settings } from './settings/schema.ts';
 import { DiscordChannel } from './channels/discord/channel.ts';
 import { ElevenLabsTts } from './speech/elevenlabs/tts.ts';
 import { ElevenLabsStt } from './speech/elevenlabs/stt.ts';
+import { DumpingStt } from './speech/debug.ts';
 import type { HumanResponse } from './types/index.ts';
 
 /**
@@ -44,10 +47,16 @@ export function buildDefaultDeps(settings: Settings): AskDeps {
     voiceId: settings.elevenlabs.voiceId,
     model: settings.elevenlabs.ttsModel,
   });
-  const stt = new ElevenLabsStt({
+  const elevenLabsStt = new ElevenLabsStt({
     apiKey: settings.elevenlabs.apiKey,
     model: settings.elevenlabs.sttModel,
   });
+  // With debugAudioDir set, every captured utterance is also written to disk as a WAV so a
+  // human can hear exactly what the bot heard when a transcript comes back wrong.
+  const stt =
+    settings.call.debugAudioDir === ''
+      ? elevenLabsStt
+      : new DumpingStt(elevenLabsStt, settings.call.debugAudioDir);
 
   return { channel, tts, stt };
 }
