@@ -75,6 +75,12 @@ schema:
 | `ETPH_CALL_CONFIRM_ROUNDS` | Maximum number of rounds spent confirming the transcribed answer with the human. | default: `3` |
 | `ETPH_CALL_AFFIRMATIVE_WORDS` | Words treated as an affirmative confirmation from the human. | default: `["yes","yeah","yep","correct","right","ja"]` |
 | `ETPH_CHANNEL` | Communication channel to use for asking the human. Currently only `"discord"` is supported. | default: `"discord"` |
+| `ETPH_SERVER_HOST` | Host interface the switchboard server binds to. | default: `"127.0.0.1"` |
+| `ETPH_SERVER_PORT` | Port the switchboard server listens on. | default: `3117` |
+| `ETPH_SERVER_AUTH_TOKEN` | Bearer token the switchboard server requires on every request. Empty disables auth, which is only allowed on loopback binds. | secret, default: `""` |
+
+These `server.*` settings are only consumed by `et-phone-home serve` — see
+["Switchboard (concurrent agents)"](#switchboard-concurrent-agents) below.
 
 This same table is generated at runtime — run `bun run src/cli/index.ts help` to print it
 straight from the code.
@@ -173,6 +179,95 @@ Exit codes:
 JSON blob with `--json`) — nothing else is ever written there. All usage text, help output, and
 diagnostics go to stderr, so a caller can safely pipe stdout into another program.
 
+## Switchboard (concurrent agents)
+
+A Discord bot can hold only one voice call per guild at a time — a second concurrent `ask()`
+would steal the bot out of the first call's voice channel. If several independent agents need to
+place calls at once (for example, a workflow that specs out a batch of work items owned by
+different people), they need a single coordinator serializing calls, not each agent dialing out
+on its own. The switchboard is that coordinator: one long-running daemon, an in-memory FIFO
+queue, one call at a time. Callers submit a question and poll for the result; they never touch
+Discord or ElevenLabs credentials directly.
+
+### Run the daemon
+
+```bash
+bun run src/cli/index.ts serve
+```
+
+This binds `settings.server.host`/`settings.server.port` (`ETPH_SERVER_HOST` /
+`ETPH_SERVER_PORT`, default `127.0.0.1:3117`) and serves until you stop the process. The daemon
+owns the Discord bot token and ElevenLabs key; agents talking to it never see either.
+
+### HTTP API
+
+Submit-then-poll, not a held-open request — a call can queue for tens of minutes, which would
+fight every HTTP timeout between client and server.
+
+**`POST /ask`** — submit a question, returns `202` immediately with the job's queue position:
+
+```bash
+curl -X POST http://127.0.0.1:3117/ask \
+  -H 'content-type: application/json' \
+  -d '{"question": "Ship it?", "userId": "123456789012345678"}'
+# -> 202 {"id":"...","position":1}
+```
+
+**`GET /ask/:id`** — poll for the result; `waitMs` (capped at 60000) long-polls instead of
+returning immediately:
+
+```bash
+curl "http://127.0.0.1:3117/ask/<id>?waitMs=30000"
+# -> {"state":"queued","position":1}
+# -> {"state":"done","result":{"answered":true,"answer":"Yes","status":"answered", ...}}
+```
+
+**`DELETE /ask/:id`** — cancel a job that hasn't started calling yet:
+
+```bash
+curl -X DELETE http://127.0.0.1:3117/ask/<id>
+# -> 200 {"state":"cancelled"}   (or 409 if the call is already in progress, 404 if unknown)
+```
+
+### `userId` and identity
+
+`userId` is the Discord user ID of the human to call — the switchboard routes calls, it doesn't
+resolve identity. Mapping a work-item owner or task assignee to a Discord user ID is the caller's
+job.
+
+### CLI: ask through the switchboard
+
+```bash
+bun run src/cli/index.ts ask "Ship it?" --server http://127.0.0.1:3117 --user 123456789012345678
+
+# Cap how long this ask may sit in the queue before it expires unanswered
+bun run src/cli/index.ts ask "Ship it?" --server http://127.0.0.1:3117 --user 123456789012345678 \
+  --queue-timeout 600
+```
+
+Same stdout purity and exit codes as a direct `ask` (`0` answered, `2` not answered, `1`
+usage/config/unreachable). `--server` requires `--user`; without `--server`, `ask` behaves exactly
+as it always has, calling Discord directly.
+
+The same round trip is available as a library call: `new SwitchboardClient({ baseUrl }).ask(...)`
+returns a `Promise<HumanResponse>`.
+
+### Auth and binding
+
+Set `ETPH_SERVER_AUTH_TOKEN` to require every request to carry `Authorization: Bearer <token>`
+(otherwise `401`). The daemon binds `127.0.0.1` by default; binding to any other host **without**
+an auth token set is refused at startup, so an unauthenticated "ring anyone" endpoint can't end
+up open on the network by accident.
+
+### Restarts lose the queue
+
+The queue is in-memory by design in v1: restarting the daemon drops whatever was queued or
+in-flight. Pollers see connection-refused and should treat it as an infrastructure failure —
+re-submit or give up, same as any other backend restart. Finished job results are kept for one
+hour after completion, then garbage-collected (polling an unknown or expired id returns `404`).
+
+See the full design doc: [`docs/superpowers/specs/2026-08-20-switchboard-daemon-design.md`](docs/superpowers/specs/2026-08-20-switchboard-daemon-design.md).
+
 ## Settings for integrators
 
 `src/settings/schema.ts` defines a single Zod object as the source of truth for every setting.
@@ -249,10 +344,14 @@ ETPH_ELEVENLABS_VOICE_ID
 
 ## Roadmap / future work
 
-- **Daemon mode / inbound calls** — a persistent process holding the Discord gateway connection
-  open so the human can call the agent's Discord identity directly, instead of only ever being
-  the one who gets pinged. The `CommunicationChannel` interface already carries a
-  `capabilities.inbound` flag (`false` for the current Discord channel) designed for this.
+- **Inbound calls** — the switchboard daemon still only rings out; a human calling the agent's
+  Discord identity directly (rather than only ever being the one who gets pinged) would need the
+  gateway connection to accept that direction too. The `CommunicationChannel` interface already
+  carries a `capabilities.inbound` flag (`false` for the current Discord channel) reserved for
+  this.
+- **Concurrent conversations** — the switchboard queues one call at a time by design (one bot,
+  one voice channel per guild). A pool of bot identities/voice channels behind the same queue
+  worker seam would allow true parallelism if queue latency ever becomes a real problem.
 - **Teams channel** — a `CommunicationChannel` implementation over the Microsoft Graph
   communications API.
 - **Twilio phone channel** — a real phone call, sidestepping Discord's no-DM-ring constraint

@@ -25,6 +25,14 @@ export { DumpingStt } from './speech/debug.ts';
 export { DiscordChannel } from './channels/discord/channel.ts';
 export type { DiscordChannelDeps, DiscordConfig } from './channels/discord/channel.ts';
 
+export { AskQueue } from './server/queue.ts';
+export type { AskJob, AskJobRequest, AskQueueOptions, JobState } from './server/queue.ts';
+export { startSwitchboard } from './server/http.ts';
+export type { Switchboard, SwitchboardDeps } from './server/http.ts';
+export { SwitchboardClient, SwitchboardJobEndedError } from './server/client.ts';
+export type { RemoteAskOptions, SwitchboardClientOptions } from './server/client.ts';
+export { makeDefaultRunAsk } from './server/run-ask.ts';
+
 import { askHuman } from './core/ask-human.ts';
 import { resolveSettings } from './settings/load.ts';
 import type { Settings } from './settings/schema.ts';

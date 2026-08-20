@@ -29,6 +29,7 @@ thin CLI (`et-phone-home ask "<question>"`) for non-TypeScript workflows.
 - `bun test` — run all unit tests (no credentials required)
 - `bun run typecheck` — TypeScript type checking
 - `bun run ask "<question>"` — run a real call via the CLI
+- `bun run src/cli/index.ts serve` — run the switchboard daemon (FIFO queue + HTTP API)
 
 ## File Layout
 
@@ -40,7 +41,10 @@ thin CLI (`et-phone-home ask "<question>"`) for non-TypeScript workflows.
   helpers
 - `src/channels/discord/` — Discord channel/session implementation
 - `src/channels/loopback.ts` — in-memory fake channel/TTS/STT for tests and integrators
-- `src/cli/` — CLI entry point (arg parsing, `help`/`ask` commands, exit codes)
+- `src/server/` — switchboard daemon: FIFO queue (`queue.ts`), production call-placer
+  (`run-ask.ts`), HTTP API (`http.ts`), and remote client (`client.ts`) — lets multiple agents
+  submit asks against one bot/one-conversation-at-a-time
+- `src/cli/` — CLI entry point (arg parsing, `help`/`ask`/`serve` commands, exit codes)
 - `src/index.ts` — public library entry point (`ask`, `buildDefaultDeps`, and all re-exports)
 - `tests/` — mirrors `src/` structure; `tests/integration/` holds the live Discord/ElevenLabs
   test, skipped unless `ETPH_LIVE_TEST=1` is set on top of all required `ETPH_*` credentials
@@ -65,3 +69,7 @@ thin CLI (`et-phone-home ask "<question>"`) for non-TypeScript workflows.
   (`I heard: "<transcript>" — is that correct? Please answer yes or no.` and `Okay, please repeat
   your answer.`) that tests assert on directly — do not reword them without updating
   `tests/core/ask-human.test.ts`.
+- **Job state is a wrapper, not a replacement.** The switchboard's `AskJob`/`JobState`
+  (`queued -> calling -> done | expired | cancelled`) describe the job's place in the queue;
+  `HumanResponse` — what a finished job's `result` field holds — is the exact same public
+  contract `askHuman` has always returned, untouched by any of this.
