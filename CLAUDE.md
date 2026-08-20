@@ -42,8 +42,10 @@ thin CLI (`et-phone-home ask "<question>"`) for non-TypeScript workflows.
 - `src/channels/loopback.ts` — in-memory fake channel/TTS/STT for tests and integrators
 - `src/cli/` — CLI entry point (arg parsing, `help`/`ask` commands, exit codes)
 - `src/index.ts` — public library entry point (`ask`, `buildDefaultDeps`, and all re-exports)
-- `tests/` — mirrors `src/` structure; `tests/integration/` holds the credential-gated live
-  Discord/ElevenLabs test, skipped automatically unless all required `ETPH_*` env vars are set
+- `tests/` — mirrors `src/` structure; `tests/integration/` holds the live Discord/ElevenLabs
+  test, skipped unless `ETPH_LIVE_TEST=1` is set on top of all required `ETPH_*` credentials
+  (the explicit opt-in exists because Bun auto-loads `.env`, so credentials alone would make
+  every bare `bun test` place a real call)
 
 ## Key Constraints
 
