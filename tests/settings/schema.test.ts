@@ -94,6 +94,9 @@ describe('settingsFields', () => {
         'call.affirmativeWords',
         'call.debugAudioDir',
         'channel',
+        'server.host',
+        'server.port',
+        'server.authToken',
       ].sort(),
     );
   });
@@ -135,5 +138,17 @@ describe('settingsFields', () => {
     expect(field.type).toBe('string');
     expect(field.default).toBe('discord');
     expect(field.required).toBe(false);
+  });
+
+  test('server fields have defaults and correct types', () => {
+    expect(findField('server.host').default).toBe('127.0.0.1');
+    expect(findField('server.port').default).toBe(3117);
+    expect(findField('server.port').type).toBe('number');
+    expect(findField('server.authToken').default).toBe('');
+  });
+
+  test('server.authToken is secret', () => {
+    expect(findField('server.authToken').secret).toBe(true);
+    expect(findField('server.authToken').required).toBe(false);
   });
 });

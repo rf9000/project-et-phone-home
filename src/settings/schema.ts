@@ -70,6 +70,23 @@ export const settingsSchema = z.object({
     .literal('discord')
     .default('discord')
     .describe('Communication channel to use for asking the human. Currently only "discord" is supported.'),
+  server: z
+    .object({
+      host: z
+        .string()
+        .min(1)
+        .default('127.0.0.1')
+        .describe('Host interface the switchboard server binds to.'),
+      port: z.number().default(3117).describe('Port the switchboard server listens on.'),
+      authToken: z
+        .string()
+        .default('')
+        .describe(
+          'Bearer token the switchboard server requires on every request. Empty disables auth, which is only allowed on loopback binds.',
+        ),
+    })
+    .default({ host: '127.0.0.1', port: 3117, authToken: '' })
+    .describe('Switchboard server settings (used by `et-phone-home serve`).'),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -84,7 +101,7 @@ export interface SettingsField {
 }
 
 /** Field paths whose values must be treated as secrets (never logged, masked in UIs). */
-const SECRET_PATHS = new Set<string>(['discord.botToken', 'elevenlabs.apiKey']);
+const SECRET_PATHS = new Set<string>(['discord.botToken', 'elevenlabs.apiKey', 'server.authToken']);
 
 interface UnwrapResult {
   base: z.ZodTypeAny;
