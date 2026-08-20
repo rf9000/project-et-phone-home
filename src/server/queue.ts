@@ -79,7 +79,7 @@ export class AskQueue {
     return this.jobs.get(id);
   }
 
-  /** 1 = next up or currently in progress. Undefined when the job is not waiting. */
+  /** 1-based place in line among waiting jobs. Undefined when the job is not waiting — unknown ids and the job whose call is already in progress alike. */
   position(id: string): number | undefined {
     const index = this.pendingIds.indexOf(id);
     if (index === -1) return undefined;
