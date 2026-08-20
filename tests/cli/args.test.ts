@@ -159,3 +159,42 @@ describe('formatEnvHelp', () => {
     expect(help).toContain('Milliseconds to wait for the human to join the voice channel before giving up.');
   });
 });
+
+describe('parseArgs — serve and remote ask', () => {
+  test('serve command parses with optional --config', () => {
+    const parsed = parseArgs(['serve', '--config', 'x.json']);
+    expect(parsed.command).toBe('serve');
+    expect(parsed.configPath).toBe('x.json');
+    expect(parsed.errors).toEqual([]);
+  });
+
+  test('ask --server, --user, --queue-timeout parse', () => {
+    const parsed = parseArgs(['ask', 'q?', '--server', 'http://h:1', '--user', 'u1', '--queue-timeout', '120']);
+    expect(parsed.server).toBe('http://h:1');
+    expect(parsed.user).toBe('u1');
+    expect(parsed.queueTimeoutSeconds).toBe(120);
+    expect(parsed.errors).toEqual([]);
+  });
+
+  test('--server without a value is an error', () => {
+    expect(parseArgs(['ask', 'q', '--server']).errors).toContain('--server requires a value');
+  });
+
+  test('--queue-timeout must be a positive number', () => {
+    expect(parseArgs(['ask', 'q', '--queue-timeout', '-2']).errors.length).toBe(1);
+  });
+
+  test('--user without --server is an error', () => {
+    expect(parseArgs(['ask', 'q', '--user', 'u']).errors).toContain('--user requires --server');
+  });
+
+  test('--server with --config is an error (the server has its own settings)', () => {
+    expect(parseArgs(['ask', 'q', '--server', 'http://h:1', '--user', 'u', '--config', 'x.json']).errors).toContain(
+      '--config cannot be combined with --server',
+    );
+  });
+
+  test('ask --server without --user is an error', () => {
+    expect(parseArgs(['ask', 'q', '--server', 'http://h:1']).errors).toContain('--user is required with --server');
+  });
+});

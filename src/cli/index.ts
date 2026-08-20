@@ -7,13 +7,15 @@ import { askHuman } from '../core/ask-human.ts';
 import { buildDefaultDeps } from '../index.ts';
 import { resolveSettings } from '../settings/load.ts';
 import { settingsFields } from '../settings/schema.ts';
+import { startSwitchboard } from '../server/http.ts';
+import { SwitchboardClient, SwitchboardJobEndedError } from '../server/client.ts';
 import type { AskOptions } from '../core/ask-human.ts';
 import type { Settings, SettingsField } from '../settings/schema.ts';
 import type { HumanResponse } from '../types/index.ts';
 
 const ENV_PREFIX = 'ETPH';
 
-export type CliCommand = 'ask' | 'help';
+export type CliCommand = 'ask' | 'help' | 'serve';
 
 export interface ParsedArgs {
   command: CliCommand | undefined;
@@ -21,6 +23,9 @@ export interface ParsedArgs {
   json: boolean;
   configPath?: string;
   timeoutSeconds?: number;
+  server?: string;
+  user?: string;
+  queueTimeoutSeconds?: number;
   errors: string[];
 }
 
@@ -43,6 +48,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let json = false;
   let configPath: string | undefined;
   let timeoutSeconds: number | undefined;
+  let server: string | undefined;
+  let user: string | undefined;
+  let queueTimeoutSeconds: number | undefined;
 
   const rest = [...argv];
   const first = rest[0];
@@ -51,6 +59,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     command = 'help';
   } else if (first === 'help' || first === '--help') {
     command = 'help';
+    rest.shift();
+  } else if (first === 'serve') {
+    command = 'serve';
     rest.shift();
   } else if (first === 'ask') {
     command = 'ask';
@@ -100,6 +111,44 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === '--server') {
+      const value = rest[i + 1];
+      if (value === undefined) {
+        errors.push('--server requires a value');
+      } else {
+        server = value;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (arg === '--user') {
+      const value = rest[i + 1];
+      if (value === undefined) {
+        errors.push('--user requires a value');
+      } else {
+        user = value;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (arg === '--queue-timeout') {
+      const value = rest[i + 1];
+      if (value === undefined) {
+        errors.push('--queue-timeout requires a value');
+      } else {
+        const parsedSeconds = Number(value);
+        if (!Number.isFinite(parsedSeconds) || parsedSeconds <= 0) {
+          errors.push(`--queue-timeout must be a positive number, got: ${value}`);
+        } else {
+          queueTimeoutSeconds = parsedSeconds;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
     if (arg.startsWith('--')) {
       errors.push(`Unknown flag: ${arg}`);
       continue;
@@ -113,7 +162,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     errors.push(`Unexpected argument: ${arg}`);
   }
 
-  return { command, question, json, configPath, timeoutSeconds, errors };
+  if (user !== undefined && server === undefined) errors.push('--user requires --server');
+  if (server !== undefined && configPath !== undefined) errors.push('--config cannot be combined with --server');
+  if (command === 'ask' && server !== undefined && user === undefined) {
+    errors.push('--user is required with --server');
+  }
+
+  return { command, question, json, configPath, timeoutSeconds, server, user, queueTimeoutSeconds, errors };
 }
 
 /** Maps a HumanResponse to the process exit code: 0 when answered, 2 otherwise. */
@@ -141,12 +196,16 @@ function usage(): string {
     '',
     'Usage:',
     '  et-phone-home ask "<question>"    Ask a question (reads stdin if omitted)',
+    '  et-phone-home serve               Run the switchboard daemon (queue + HTTP API)',
     '  et-phone-home help                Show this help',
     '',
     'Flags:',
     '  --json                Print the full HumanResponse as JSON instead of plain text',
     '  --config <path>       Path to a JSON settings file (overrides env vars)',
     '  --timeout <seconds>   Seconds to wait for pickup (overrides call.joinTimeoutMs)',
+    '  --server <url>        Send the ask to a running switchboard instead of calling directly',
+    '  --user <id>           Discord user ID to call (required with --server)',
+    '  --queue-timeout <s>   Seconds the ask may wait in the switchboard queue before expiring',
     '',
     'Exit codes:',
     '  0   answered',
@@ -164,12 +223,58 @@ async function readQuestionFromStdin(): Promise<string> {
   return text.trim();
 }
 
+function printResult(result: HumanResponse, parsed: ParsedArgs): 0 | 2 {
+  // Diagnostics go to stderr in both modes so stdout stays purely machine-readable.
+  if (result.error !== undefined) {
+    process.stderr.write(`Call failed: ${result.error}\n`);
+  }
+
+  if (parsed.json) {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } else if (result.answered && result.answer !== null) {
+    process.stdout.write(`${result.answer}\n`);
+  } else {
+    process.stderr.write(`Not answered (status: ${result.status}).\n`);
+  }
+
+  return exitCodeFor(result);
+}
+
 async function runAsk(parsed: ParsedArgs): Promise<number> {
   const question = (parsed.question ?? (await readQuestionFromStdin())).trim();
 
   if (question === '') {
     process.stderr.write('Usage error: no question provided (pass it as an argument or via stdin).\n');
     return 1;
+  }
+
+  if (parsed.server !== undefined) {
+    const client = new SwitchboardClient({
+      baseUrl: parsed.server,
+      authToken: process.env.ETPH_SERVER_AUTH_TOKEN,
+    });
+
+    let result: HumanResponse;
+    try {
+      result = await client.ask(question, {
+        userId: parsed.user as string, // parser guarantees presence with --server
+        ...(parsed.queueTimeoutSeconds !== undefined
+          ? { queueTimeoutMs: parsed.queueTimeoutSeconds * 1000 }
+          : {}),
+        ...(parsed.timeoutSeconds !== undefined
+          ? { call: { joinTimeoutMs: parsed.timeoutSeconds * 1000 } }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof SwitchboardJobEndedError) {
+        process.stderr.write(`${error.message}\n`);
+        return 2;
+      }
+      process.stderr.write(`${(error as Error).message}\n`);
+      return 1;
+    }
+
+    return printResult(result, parsed);
   }
 
   let settings: Settings;
@@ -192,20 +297,30 @@ async function runAsk(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
 
-  // Diagnostics go to stderr in both modes so stdout stays purely machine-readable.
-  if (result.error !== undefined) {
-    process.stderr.write(`Call failed: ${result.error}\n`);
+  return printResult(result, parsed);
+}
+
+async function runServe(parsed: ParsedArgs): Promise<number> {
+  let settings: Settings;
+  try {
+    settings = resolveSettings({ filePath: parsed.configPath });
+  } catch (error) {
+    process.stderr.write(`${(error as Error).message}\n`);
+    return 1;
   }
 
-  if (parsed.json) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  } else if (result.answered && result.answer !== null) {
-    process.stdout.write(`${result.answer}\n`);
-  } else {
-    process.stderr.write(`Not answered (status: ${result.status}).\n`);
+  let switchboard: ReturnType<typeof startSwitchboard>;
+  try {
+    switchboard = startSwitchboard(settings);
+  } catch (error) {
+    process.stderr.write(`${(error as Error).message}\n`);
+    return 1;
   }
 
-  return exitCodeFor(result);
+  process.stderr.write(`switchboard listening on http://${settings.server.host}:${switchboard.port}\n`);
+  // Serve until the process is terminated (Ctrl+C / service manager).
+  await new Promise<never>(() => {});
+  return 0;
 }
 
 async function main(): Promise<number> {
@@ -223,6 +338,8 @@ async function main(): Promise<number> {
     process.stdout.write(`${usage()}\n`);
     return 0;
   }
+
+  if (parsed.command === 'serve') return runServe(parsed);
 
   return runAsk(parsed);
 }
