@@ -10,6 +10,7 @@ import type {
   ChannelCapabilities,
   ChannelSession,
   CommunicationChannel,
+  TextToSpeech,
 } from '../../src/types/index.ts';
 
 function mockSettings(overrides: Record<string, unknown> = {}): Settings {
@@ -259,6 +260,70 @@ describe('askHuman — channel throws mid-call', () => {
     expect(result.status).toBe('error');
     expect(result.channel).toBe('throwing');
     expect(channel.inner.lastSession?.hungUp).toBe(true);
+  });
+
+  test('error status carries the failure message so callers can diagnose it', async () => {
+    const channel = new ThrowingChannel({ pickUp: true, utterances: ['four'] }, 'speak');
+    const deps: AskDeps = { channel, tts: new LoopbackTts(), stt: new LoopbackStt() };
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('boom: channel exploded mid-call');
+  });
+
+  test('error message includes the whole cause chain', async () => {
+    // Mirrors production wiring: every layer chains the one below it via { cause }, so a bare
+    // top-level message ("TTS request failed") hides the part that actually says what went wrong.
+    class ThrowingTts implements TextToSpeech {
+      synthesize(): Promise<AudioData> {
+        return Promise.reject(
+          new Error('ElevenLabs TTS request failed.', {
+            cause: new Error('HTTP 401: invalid api key'),
+          }),
+        );
+      }
+    }
+
+    const deps: AskDeps = {
+      channel: new LoopbackChannel({ pickUp: true, utterances: ['four'] }),
+      tts: new ThrowingTts(),
+      stt: new LoopbackStt(),
+    };
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('ElevenLabs TTS request failed.');
+    expect(result.error).toContain('HTTP 401: invalid api key');
+  });
+
+  test('non-Error throwables are still reported', async () => {
+    class StringThrowingTts implements TextToSpeech {
+      synthesize(): Promise<AudioData> {
+        return Promise.reject('just a string');
+      }
+    }
+
+    const deps: AskDeps = {
+      channel: new LoopbackChannel({ pickUp: true, utterances: ['four'] }),
+      tts: new StringThrowingTts(),
+      stt: new LoopbackStt(),
+    };
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('just a string');
+  });
+
+  test('successful calls carry no error field', async () => {
+    const { deps } = makeDeps({ pickUp: true, utterances: ['four', 'yes'] });
+
+    const result = await askHuman('what is 2+2?', mockSettings(), undefined, deps);
+
+    expect(result.status).toBe('answered');
+    expect(result.error).toBeUndefined();
   });
 });
 

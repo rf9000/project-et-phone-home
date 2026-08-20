@@ -11,6 +11,16 @@ export class SpeechApiError extends Error {
   }
 }
 
+/** Longest response body echoed into the error message; the full body stays on `.body`. */
+const MAX_BODY_IN_MESSAGE = 400;
+
+/** Collapses whitespace and truncates, so a JSON or HTML error page stays readable on one line. */
+function summarizeBody(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  if (flat === '') return '';
+  return flat.length <= MAX_BODY_IN_MESSAGE ? flat : `${flat.slice(0, MAX_BODY_IN_MESSAGE)}...`;
+}
+
 export interface FetchWithRetryOptions {
   maxRetries?: number;
   retryDelaysMs?: number[];
@@ -50,10 +60,13 @@ export async function fetchWithRetry(
       }
 
       const body = await response.text();
-      const apiError = new SpeechApiError(`Speech API request failed with status ${response.status}`, {
-        status: response.status,
-        body,
-      });
+      // The status alone is not actionable — a 400 from ElevenLabs means "bad voice id" or
+      // "unknown model" only if you can read the body, so it goes in the message too.
+      const summary = summarizeBody(body);
+      const apiError = new SpeechApiError(
+        `Speech API request failed with status ${response.status}${summary === '' ? '' : `: ${summary}`}`,
+        { status: response.status, body },
+      );
 
       if (!isRetryableStatus(response.status)) {
         throw apiError;

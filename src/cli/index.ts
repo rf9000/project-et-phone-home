@@ -192,6 +192,11 @@ async function runAsk(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
 
+  // Diagnostics go to stderr in both modes so stdout stays purely machine-readable.
+  if (result.error !== undefined) {
+    process.stderr.write(`Call failed: ${result.error}\n`);
+  }
+
   if (parsed.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } else if (result.answered && result.answer !== null) {

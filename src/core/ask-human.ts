@@ -26,6 +26,33 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Flattens an error and its `cause` chain into one line. Every layer here wraps the one below it
+ * with `{ cause }` (voice connect wraps entersState, the HTTP helper wraps fetch), so the topmost
+ * message alone routinely says "request failed" while the cause says *why*. Depth is capped and
+ * visited errors tracked so a self-referential cause cannot loop.
+ */
+function describeError(error: unknown, maxDepth = 5): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  while (current !== undefined && current !== null && parts.length < maxDepth && !seen.has(current)) {
+    seen.add(current);
+
+    if (current instanceof Error) {
+      parts.push(current.message === '' ? current.name : `${current.name}: ${current.message}`);
+      current = current.cause;
+      continue;
+    }
+
+    parts.push(typeof current === 'string' ? current : JSON.stringify(current) ?? String(current));
+    break;
+  }
+
+  return parts.length === 0 ? 'Unknown error' : parts.join(' <- caused by: ');
+}
+
 /** Case-insensitive, word-boundary match against any of the affirmative words (e.g. 'yesterday' must NOT match 'yes'). */
 function isAffirmative(reply: string, affirmativeWords: string[]): boolean {
   if (reply.trim() === '') return false;
@@ -63,6 +90,7 @@ export async function askHuman(
 
   let status: AskStatus;
   let answer: string | null = null;
+  let failure: string | undefined;
 
   try {
     await session.ring();
@@ -119,9 +147,11 @@ export async function askHuman(
         }
       }
     }
-  } catch {
+  } catch (error) {
     status = 'error';
     answer = null;
+    // Without this the caller gets a bare 'error' status with nothing to act on.
+    failure = describeError(error);
   } finally {
     await session.hangUp();
   }
@@ -132,5 +162,6 @@ export async function askHuman(
     status,
     channel: channel.name,
     durationMs: Date.now() - start,
+    ...(failure === undefined ? {} : { error: failure }),
   };
 }

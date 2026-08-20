@@ -12,6 +12,7 @@ export interface HumanResponse {
   status: AskStatus;
   channel: string;           // channel name, e.g. 'discord'
   durationMs: number;        // wall time of the whole ask
+  error?: string;            // set only when status === 'error': the failure and its cause chain
 }
 
 export interface AskRequest {

@@ -91,6 +91,32 @@ describe('fetchWithRetry — no retry on 400', () => {
       expect(apiErr.body).toBe('bad request');
     }
   });
+
+  test('message carries the response body, which is where the API says what was wrong', async () => {
+    const fetchFn = (async () =>
+      makeResponse(400, '{"detail":{"message":"voice_id not found"}}')) as unknown as typeof fetch;
+
+    try {
+      await fetchWithRetry('https://example.test/x', { method: 'GET' }, { fetchFn, retryDelaysMs: [0] });
+      throw new Error('expected fetchWithRetry to throw');
+    } catch (err) {
+      expect((err as SpeechApiError).message).toContain('voice_id not found');
+    }
+  });
+
+  test('an oversized body is truncated in the message but kept whole on .body', async () => {
+    const huge = 'x'.repeat(2000);
+    const fetchFn = (async () => makeResponse(400, huge)) as unknown as typeof fetch;
+
+    try {
+      await fetchWithRetry('https://example.test/x', { method: 'GET' }, { fetchFn, retryDelaysMs: [0] });
+      throw new Error('expected fetchWithRetry to throw');
+    } catch (err) {
+      const apiErr = err as SpeechApiError;
+      expect(apiErr.body).toBe(huge);
+      expect(apiErr.message.length).toBeLessThan(600);
+    }
+  });
 });
 
 describe('fetchWithRetry — network error retry', () => {
