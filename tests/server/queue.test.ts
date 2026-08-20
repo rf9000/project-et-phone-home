@@ -76,3 +76,101 @@ describe('AskQueue core', () => {
     expect(queue.get('00000000-0000-0000-0000-000000000000')).toBeUndefined();
   });
 });
+
+describe('AskQueue expiry, cancel, GC, waitForUpdate', () => {
+  test('queued job past its queueTimeoutMs expires at pickup and never runs', async () => {
+    let t = 0;
+    const { calls, runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk, now: () => t });
+
+    queue.submit(REQ); // occupies the worker
+    const b = queue.submit({ ...REQ, userId: 'user-2', queueTimeoutMs: 500 });
+    await Bun.sleep(0);
+
+    t = 1000; // b is now past its queue timeout
+    calls[0]!.resolve(answered('A'));
+    await Bun.sleep(0);
+
+    expect(queue.get(b.id)?.state).toBe('expired');
+    expect(calls.length).toBe(1); // b never rang anyone
+  });
+
+  test('cancel while queued works; cancel while calling is refused', async () => {
+    const { calls, runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk });
+
+    const a = queue.submit(REQ);
+    const b = queue.submit({ ...REQ, userId: 'user-2' });
+    await Bun.sleep(0);
+
+    expect(queue.cancel(b.id)).toBe('cancelled');
+    expect(queue.get(b.id)?.state).toBe('cancelled');
+    expect(queue.cancel(a.id)).toBe('calling'); // in progress: refused
+    expect(queue.cancel('00000000-0000-0000-0000-000000000000')).toBe('not_found');
+
+    calls[0]!.resolve(answered('A'));
+    await Bun.sleep(0);
+    expect(calls.length).toBe(1); // cancelled b never started
+    expect(queue.cancel(a.id)).toBe('done'); // terminal: refused, reports state
+  });
+
+  test('finished jobs are GCd after resultTtlMs', async () => {
+    let t = 0;
+    const queue = new AskQueue({
+      runAsk: () => Promise.resolve(answered('x')),
+      resultTtlMs: 100,
+      now: () => t,
+    });
+    const { id } = queue.submit(REQ);
+    await Bun.sleep(0);
+    expect(queue.get(id)?.state).toBe('done');
+
+    t = 200;
+    expect(queue.get(id)).toBeUndefined();
+  });
+
+  test('waitForUpdate resolves early when the job finishes', async () => {
+    const { calls, runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk });
+    const { id } = queue.submit(REQ);
+    await Bun.sleep(0);
+
+    const wait = queue.waitForUpdate(id, 60_000);
+    calls[0]!.resolve(answered('done!'));
+    const job = await wait; // must not take 60s
+    expect(job?.state).toBe('done');
+  });
+
+  test('waitForUpdate times out returning the current state', async () => {
+    const { runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk });
+    queue.submit(REQ);
+    const b = queue.submit({ ...REQ, userId: 'user-2' });
+    await Bun.sleep(0);
+
+    const job = await queue.waitForUpdate(b.id, 20);
+    expect(job?.state).toBe('queued');
+  });
+
+  test('waitForUpdate on unknown id resolves undefined', async () => {
+    const queue = new AskQueue({ runAsk: () => Promise.resolve(answered('x')) });
+    expect(await queue.waitForUpdate('00000000-0000-0000-0000-000000000000', 10)).toBeUndefined();
+  });
+
+  test('stop() prevents queued jobs from starting; the in-flight call finishes', async () => {
+    const { calls, runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk });
+
+    const a = queue.submit(REQ);
+    const b = queue.submit({ ...REQ, userId: 'user-2' });
+    await Bun.sleep(0);
+
+    queue.stop();
+    calls[0]!.resolve(answered('A'));
+    await Bun.sleep(0);
+
+    expect(queue.get(a.id)?.state).toBe('done'); // in-flight call finished
+    expect(queue.get(b.id)?.state).toBe('queued'); // never started
+    expect(calls.length).toBe(1);
+  });
+});

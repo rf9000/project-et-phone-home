@@ -86,6 +86,44 @@ export class AskQueue {
     return index + 1 + (this.working ? 1 : 0);
   }
 
+  /** 'cancelled' on success; otherwise the state that blocked it ('not_found' for unknown ids). */
+  cancel(id: string): 'cancelled' | 'not_found' | JobState {
+    const job = this.jobs.get(id);
+    if (job === undefined) return 'not_found';
+    if (job.state !== 'queued') return job.state;
+    const index = this.pendingIds.indexOf(id);
+    if (index !== -1) this.pendingIds.splice(index, 1);
+    this.finish(job, 'cancelled');
+    return 'cancelled';
+  }
+
+  /**
+   * Long-poll primitive: resolves as soon as the job's state changes (queued->calling counts),
+   * or with the current job once waitMs elapses. Undefined = unknown/GCd id.
+   */
+  async waitForUpdate(id: string, waitMs: number): Promise<AskJob | undefined> {
+    const job = this.jobs.get(id);
+    if (job === undefined) return undefined;
+    const isTerminal = job.state !== 'queued' && job.state !== 'calling';
+    if (isTerminal || waitMs <= 0) return job;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const wake = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(wake, waitMs);
+      const list = this.waiters.get(id) ?? [];
+      list.push(wake);
+      this.waiters.set(id, list);
+    });
+
+    return this.jobs.get(id);
+  }
+
   /** No new jobs start; an in-flight call is allowed to finish. */
   stop(): void {
     this.stopped = true;
