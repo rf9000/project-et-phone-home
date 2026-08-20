@@ -26,7 +26,6 @@ export { DiscordChannel } from './channels/discord/channel.ts';
 export type { DiscordChannelDeps, DiscordConfig } from './channels/discord/channel.ts';
 
 import { askHuman } from './core/ask-human.ts';
-import type { AskDeps, AskOptions } from './core/ask-human.ts';
 import { resolveSettings } from './settings/load.ts';
 import type { Settings } from './settings/schema.ts';
 import { buildDefaultDeps } from './deps.ts';
