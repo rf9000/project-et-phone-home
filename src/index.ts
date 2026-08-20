@@ -5,6 +5,7 @@ export * from './types/index.ts';
 
 export { askHuman } from './core/ask-human.ts';
 export type { AskDeps, AskOptions } from './core/ask-human.ts';
+export { buildDefaultDeps } from './deps.ts';
 
 export { resolveSettings } from './settings/load.ts';
 export type { SettingsSources } from './settings/load.ts';
@@ -28,38 +29,8 @@ import { askHuman } from './core/ask-human.ts';
 import type { AskDeps, AskOptions } from './core/ask-human.ts';
 import { resolveSettings } from './settings/load.ts';
 import type { Settings } from './settings/schema.ts';
-import { DiscordChannel } from './channels/discord/channel.ts';
-import { ElevenLabsTts } from './speech/elevenlabs/tts.ts';
-import { ElevenLabsStt } from './speech/elevenlabs/stt.ts';
-import { DumpingStt } from './speech/debug.ts';
+import { buildDefaultDeps } from './deps.ts';
 import type { HumanResponse } from './types/index.ts';
-
-/**
- * Builds the production dependency set implied by `settings`: the channel named by
- * `settings.channel` (currently only 'discord') plus ElevenLabs TTS/STT. This is the wiring
- * `ask()` uses; exported separately so callers who want askHuman directly can still get the
- * default deps without re-deriving them.
- */
-export function buildDefaultDeps(settings: Settings): AskDeps {
-  const channel = new DiscordChannel(settings.discord);
-  const tts = new ElevenLabsTts({
-    apiKey: settings.elevenlabs.apiKey,
-    voiceId: settings.elevenlabs.voiceId,
-    model: settings.elevenlabs.ttsModel,
-  });
-  const elevenLabsStt = new ElevenLabsStt({
-    apiKey: settings.elevenlabs.apiKey,
-    model: settings.elevenlabs.sttModel,
-  });
-  // With debugAudioDir set, every captured utterance is also written to disk as a WAV so a
-  // human can hear exactly what the bot heard when a transcript comes back wrong.
-  const stt =
-    settings.call.debugAudioDir === ''
-      ? elevenLabsStt
-      : new DumpingStt(elevenLabsStt, settings.call.debugAudioDir);
-
-  return { channel, tts, stt };
-}
 
 /**
  * One-liner integrators call: resolves settings (env fills in whatever `settings` omits),
