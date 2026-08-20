@@ -113,6 +113,12 @@ export class AskQueue {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        const list = this.waiters.get(id);
+        if (list !== undefined) {
+          const index = list.indexOf(wake);
+          if (index !== -1) list.splice(index, 1);
+          if (list.length === 0) this.waiters.delete(id);
+        }
         resolve();
       };
       const timer = setTimeout(wake, waitMs);

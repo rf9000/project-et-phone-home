@@ -173,4 +173,18 @@ describe('AskQueue expiry, cancel, GC, waitForUpdate', () => {
     expect(queue.get(b.id)?.state).toBe('queued'); // never started
     expect(calls.length).toBe(1);
   });
+
+  test('a timed-out waitForUpdate leaves no waiter behind', async () => {
+    const { runAsk } = deferredRunAsk();
+    const queue = new AskQueue({ runAsk });
+    queue.submit(REQ);
+    const b = queue.submit({ ...REQ, userId: 'user-2' });
+    await Bun.sleep(0);
+
+    await queue.waitForUpdate(b.id, 10);
+    await queue.waitForUpdate(b.id, 10);
+
+    const waiters = (queue as unknown as { waiters: Map<string, unknown[]> }).waiters;
+    expect(waiters.get(b.id)).toBeUndefined();
+  });
 });
