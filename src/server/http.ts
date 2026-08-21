@@ -8,6 +8,9 @@ import { makeDefaultRunAsk } from './run-ask.ts';
 /** Long-poll cap per request (spec): the client simply polls again. */
 const MAX_WAIT_MS = 60_000;
 
+/** Socket idle timeout, in seconds: MAX_WAIT_MS plus headroom so a full-length poll survives. */
+const IDLE_TIMEOUT_SECONDS = MAX_WAIT_MS / 1000 + 10;
+
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 const askBodySchema = z.object({
@@ -110,6 +113,10 @@ export function startSwitchboard(settings: Settings, deps: SwitchboardDeps = {})
   const server = Bun.serve({
     hostname: host,
     port,
+    // Bun.serve idles a connection out after 10 s by default, which would kill every long-poll
+    // that actually waits. Give it headroom over MAX_WAIT_MS so the server, not the socket,
+    // decides when a poll ends. Bun takes seconds here and caps the value at 255.
+    idleTimeout: IDLE_TIMEOUT_SECONDS,
     fetch: async (req: Request): Promise<Response> => {
       if (authToken !== '' && req.headers.get('authorization') !== `Bearer ${authToken}`) {
         return json(401, { error: 'Missing or invalid bearer token.' });
