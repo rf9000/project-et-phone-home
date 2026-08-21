@@ -257,7 +257,9 @@ returns a `Promise<HumanResponse>`.
 Set `ETPH_SERVER_AUTH_TOKEN` to require every request to carry `Authorization: Bearer <token>`
 (otherwise `401`). The daemon binds `127.0.0.1` by default; binding to any other host **without**
 an auth token set is refused at startup, so an unauthenticated "ring anyone" endpoint can't end
-up open on the network by accident.
+up open on the network by accident. On the client side, `bun run src/cli/index.ts ask --server ...`
+reads that same bearer token from the `ETPH_SERVER_AUTH_TOKEN` environment variable directly (not
+via `--config`, which `--server` mode rejects).
 
 ### Restarts lose the queue
 

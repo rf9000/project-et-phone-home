@@ -81,6 +81,23 @@ describe('switchboard HTTP API', () => {
     ).toBe(404);
   });
 
+  test('GET after retention window elapses -> 404, even with no intervening POST', async () => {
+    sb = startSwitchboard(testSettings(), { runAsk: async () => answered('four') });
+
+    const { id } = (await (await postAsk({ question: 'q', userId: 'u' })).json()) as { id: string };
+    const firstPoll = await fetch(`${base()}/ask/${id}?waitMs=5000`);
+    expect(firstPoll.status).toBe(200);
+    expect(((await firstPoll.json()) as { state: string }).state).toBe('done');
+
+    // Simulate the job having finished over an hour ago (default resultTtlMs), with no other
+    // request in between to trigger GC via submit()/get().
+    const job = (sb.queue as unknown as { jobs: Map<string, { finishedAt?: number }> }).jobs.get(id);
+    job!.finishedAt = Date.now() - 2 * 60 * 60 * 1000;
+
+    const secondPoll = await fetch(`${base()}/ask/${id}?waitMs=0`);
+    expect(secondPoll.status).toBe(404);
+  });
+
   test('auth: configured token required on every route', async () => {
     sb = startSwitchboard(testSettings({ server: { host: '127.0.0.1', port: 0, authToken: 's3cret' } }), {
       runAsk: async () => answered('x'),

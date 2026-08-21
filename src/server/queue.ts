@@ -102,6 +102,9 @@ export class AskQueue {
    * or with the current job once waitMs elapses. Undefined = unknown/GCd id.
    */
   async waitForUpdate(id: string, waitMs: number): Promise<AskJob | undefined> {
+    // Poll is the only traffic a quiet daemon ever sees, so retention (finished jobs kept
+    // resultTtlMs, then GC'd -> 404) must be enforced here too, not just in submit()/get().
+    this.gc();
     const job = this.jobs.get(id);
     if (job === undefined) return undefined;
     const isTerminal = job.state !== 'queued' && job.state !== 'calling';
