@@ -70,6 +70,12 @@ export const settingsSchema = z.object({
     .literal('discord')
     .default('discord')
     .describe('Communication channel to use for asking the human. Currently only "discord" is supported.'),
+  preferIpv4: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Resolve hosts to IPv4 before IPv6. Enable when a network advertises IPv6 that does not actually route, which stalls the Discord voice connection.',
+    ),
   server: z
     .object({
       host: z

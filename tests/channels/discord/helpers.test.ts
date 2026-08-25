@@ -7,6 +7,7 @@ import {
   formatRingMessage,
   isTargetUserInChannel,
   playbackTimeoutMs,
+  voiceTimeoutMessage,
 } from '../../../src/channels/discord/helpers.ts';
 
 const USER = '111';
@@ -143,5 +144,33 @@ describe('closeStream', () => {
     // The spent stream's handler has already run, so it cannot evict the fresh entry afterwards.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(subscriptions.get('user')).toBe(second);
+  });
+});
+
+describe('voiceTimeoutMessage', () => {
+  // This message is the whole diagnosis a user gets when the voice handshake stalls. A bare
+  // "not ready within N ms" once cost an hour of bisecting a network fault that was never in
+  // the code, so it must name the things actually worth checking.
+  const message = voiceTimeoutMessage('123456789', 20_000);
+
+  test('states what failed, where, and after how long', () => {
+    expect(message).toContain('123456789');
+    expect(message).toContain('20000 ms');
+    expect(message.toLowerCase()).toContain('voice');
+  });
+
+  test('points at the network causes rather than the code', () => {
+    const lower = message.toLowerCase();
+    expect(lower).toContain('network');
+    expect(lower).toContain('ipv6');
+    expect(message).toContain('ETPH_PREFER_IPV4');
+  });
+
+  test('names the diagnostic script that identifies the stalling phase', () => {
+    expect(message).toContain('scripts/voice-trace.ts');
+  });
+
+  test('is a single line so it stays readable in daemon logs and JSON output', () => {
+    expect(message).not.toContain('\n');
   });
 });

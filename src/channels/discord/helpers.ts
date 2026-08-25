@@ -41,6 +41,26 @@ export function playbackTimeoutMs(byteLength: number): number {
   return Math.ceil(byteLength / DISCORD_PCM_BYTES_PER_MS) + PLAYBACK_SLACK_MS;
 }
 
+/**
+ * The message shown when the voice handshake never reaches Ready.
+ *
+ * Everything else in a call — gateway login, REST, the text ping, presence detection — runs over
+ * ordinary HTTPS, but the voice websocket connects to a `*.discord.media` host on its own port,
+ * so it is the one leg a restrictive or broken network breaks on its own. A bare "not ready
+ * within N ms" sends the reader hunting through their own code; these pointers send them to the
+ * network, which is where the fault almost always is.
+ */
+export function voiceTimeoutMessage(voiceChannelId: string, timeoutMs: number): string {
+  return (
+    `Discord voice connection to channel ${voiceChannelId} was not ready within ${timeoutMs} ms. ` +
+    'Everything else (login, text ping) uses HTTPS, so this usually means the network is blocking ' +
+    'or black-holing the voice connection rather than anything being wrong with the bot: check for ' +
+    'a firewall/VPN blocking outbound traffic to *.discord.media, or broken IPv6 routing (set ' +
+    'ETPH_PREFER_IPV4=true to force IPv4). Run `bun run scripts/voice-trace.ts` to see which phase ' +
+    'stalls.'
+  );
+}
+
 /** Minimal structural view of a Node stream that can be destroyed and emits 'close'. */
 export interface ClosableStream {
   readonly destroyed: boolean;

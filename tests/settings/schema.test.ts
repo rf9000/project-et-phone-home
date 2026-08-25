@@ -94,6 +94,7 @@ describe('settingsFields', () => {
         'call.affirmativeWords',
         'call.debugAudioDir',
         'channel',
+        'preferIpv4',
         'server.host',
         'server.port',
         'server.authToken',
@@ -150,5 +151,12 @@ describe('settingsFields', () => {
   test('server.authToken is secret', () => {
     expect(findField('server.authToken').secret).toBe(true);
     expect(findField('server.authToken').required).toBe(false);
+  });
+
+  test('preferIpv4 is an opt-in boolean, off by default', () => {
+    const field = findField('preferIpv4');
+    expect(field.type).toBe('boolean');
+    expect(field.default).toBe(false);
+    expect(field.required).toBe(false);
   });
 });

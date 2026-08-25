@@ -16,7 +16,13 @@ import type { Client, Guild, VoiceState } from 'discord.js';
 import prism from 'prism-media';
 import type { AskRequest, AudioData, ChannelSession } from '../../types/index.ts';
 import { DISCORD_CHANNELS, DISCORD_SAMPLE_RATE, fromDiscordCapture, toDiscordPlayable } from './audio.ts';
-import { closeStream, formatRingMessage, isTargetUserInChannel, playbackTimeoutMs } from './helpers.ts';
+import {
+  closeStream,
+  formatRingMessage,
+  isTargetUserInChannel,
+  playbackTimeoutMs,
+  voiceTimeoutMessage,
+} from './helpers.ts';
 
 /** How long the voice websocket/UDP handshake may take before we give up. */
 const VOICE_READY_TIMEOUT_MS = 20_000;
@@ -269,10 +275,7 @@ export class DiscordSession implements ChannelSession {
       await entersState(connection, VoiceConnectionStatus.Ready, VOICE_READY_TIMEOUT_MS);
     } catch (error) {
       destroyConnection(connection);
-      throw new Error(
-        `Discord voice connection to channel ${this.voiceChannelId} was not ready within ${VOICE_READY_TIMEOUT_MS} ms.`,
-        { cause: error },
-      );
+      throw new Error(voiceTimeoutMessage(this.voiceChannelId, VOICE_READY_TIMEOUT_MS), { cause: error });
     }
 
     this.connection = connection;

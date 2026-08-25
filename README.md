@@ -323,6 +323,37 @@ See the full design doc: [`docs/superpowers/specs/2026-08-05-et-phone-home-desig
   working fallback runtime if needed.
 - No FFmpeg installation is required.
 
+## Troubleshooting a failed call
+
+Every failure comes back as a `HumanResponse` with `status: "error"` and an `error` field holding
+the message plus its whole `cause` chain, printed to stderr by the CLI. Start there — it usually
+names the problem outright (an invalid ElevenLabs key, a voice the plan cannot use, a channel the
+bot was never invited to).
+
+**"voice connection … was not ready within 20000 ms"** is the one failure that is almost never
+about the bot. Login, the text ping, and ElevenLabs all run over ordinary HTTPS; the voice
+websocket connects to a `*.discord.media` host on its own port, so it is the single leg a
+restrictive or broken network breaks by itself. To find out which phase stalls:
+
+```bash
+bun run scripts/voice-trace.ts
+```
+
+It reports how long the handshake spent in each phase and what a stall there means, then prints a
+reachability check for the exact endpoint Discord assigned. Common causes:
+
+- **A firewall or VPN blocking `*.discord.media`** — the trace stalls in `OpeningWs`.
+- **IPv6 that is advertised but does not route.** Also stalls in `OpeningWs`: hosts resolve
+  IPv6-first, and packets are dropped rather than rejected, so each attempt hangs until the TCP
+  timeout even though IPv4 to the same host works. Set `ETPH_PREFER_IPV4=true` to resolve IPv4
+  first. It is off by default because flipping the order unconditionally would break IPv6-only
+  networks the same way, and because a dead IPv6 route is a real fault worth seeing.
+- **Blocked outbound UDP** — the trace stalls in `UdpHandshaking`.
+- **A wedged voice session** — the trace never leaves `Signalling`; try a brand-new voice channel.
+
+Because the whole voice path depends on the network it runs on, a bot that works on one network
+can fail on another with no code change at all.
+
 ## Testing
 
 ```bash
