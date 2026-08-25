@@ -9,6 +9,8 @@ import { resolveSettings } from '../settings/load.ts';
 import { settingsFields } from '../settings/schema.ts';
 import { startSwitchboard } from '../server/http.ts';
 import { SwitchboardClient, SwitchboardJobEndedError } from '../server/client.ts';
+import { makeDefaultRunAsk } from '../server/run-ask.ts';
+import type { AskJobRequest } from '../server/queue.ts';
 import type { AskOptions } from '../core/ask-human.ts';
 import type { Settings, SettingsField } from '../settings/schema.ts';
 import type { HumanResponse } from '../types/index.ts';
@@ -309,9 +311,23 @@ async function runServe(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
 
+  // A daemon whose terminal says nothing about the calls it places is undiagnosable, so wrap the
+  // production call-placer to log each job's start and outcome. Diagnostics go to stderr; the
+  // daemon writes nothing to stdout at all.
+  const placeCall = makeDefaultRunAsk(settings);
+  const runAskLogged = async (request: AskJobRequest): Promise<HumanResponse> => {
+    const started = Date.now();
+    process.stderr.write(`[call] start user=${request.userId} question=${JSON.stringify(request.question)}\n`);
+    const result = await placeCall(request);
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    const detail = result.error === undefined ? '' : ` error=${result.error}`;
+    process.stderr.write(`[call] end   user=${request.userId} status=${result.status} in ${seconds}s${detail}\n`);
+    return result;
+  };
+
   let switchboard: ReturnType<typeof startSwitchboard>;
   try {
-    switchboard = startSwitchboard(settings);
+    switchboard = startSwitchboard(settings, { runAsk: runAskLogged });
   } catch (error) {
     process.stderr.write(`${(error as Error).message}\n`);
     return 1;
