@@ -54,6 +54,20 @@ describe('ElevenLabsTts', () => {
 
     await expect(tts.synthesize('hi')).rejects.toThrow(SpeechApiError);
   });
+
+  // Regression guard: an empty 200 used to become a zero-length clip that speak() skipped
+  // silently, so the call looked healthy while the human heard nothing.
+  test('throws SpeechApiError when a 200 carries no audio', async () => {
+    const fetchFn = (async () => new Response(new Uint8Array(0), { status: 200 })) as unknown as typeof fetch;
+
+    const tts = new ElevenLabsTts(
+      { apiKey: 'test-key', voiceId: 'voice-123', model: 'eleven_multilingual_v2' },
+      { fetchFn, retryDelaysMs: [0, 0, 0] },
+    );
+
+    await expect(tts.synthesize('hi')).rejects.toThrow(SpeechApiError);
+    await expect(tts.synthesize('hi')).rejects.toThrow(/empty body/);
+  });
 });
 
 describe('ElevenLabsStt', () => {

@@ -16,6 +16,7 @@ import type { Client, Guild, VoiceState } from 'discord.js';
 import prism from 'prism-media';
 import type { AskRequest, AudioData, ChannelSession } from '../../types/index.ts';
 import { DISCORD_CHANNELS, DISCORD_SAMPLE_RATE, fromDiscordCapture, toDiscordPlayable } from './audio.ts';
+import { describeE2ee, e2eeNotReadyMessage, waitForE2eeReady } from './dave.ts';
 import {
   VOICE_READY_TIMEOUT_MS,
   closeStream,
@@ -27,6 +28,12 @@ import {
 
 /** How long the player may take to actually start emitting audio. */
 const PLAYBACK_START_TIMEOUT_MS = 5_000;
+/**
+ * How long speak() waits for DAVE end-to-end encryption to become ready before playing anyway.
+ * The MLS handshake normally completes well under a second after Ready; a call that waits this
+ * long is on a network that is dropping the voice websocket's binary frames.
+ */
+const E2EE_READY_TIMEOUT_MS = 10_000;
 /** Opus frame size for 20 ms of 48 kHz audio. */
 const OPUS_FRAME_SIZE = 960;
 /** How long a spent subscription gets to release its receiver slot before we give up on it. */
@@ -102,6 +109,8 @@ export class DiscordSession implements ChannelSession {
 
   private connection: VoiceConnection | undefined;
   private hungUp = false;
+  /** Warn about a missing E2EE handshake once per call, not once per utterance. */
+  private warnedE2eeNotReady = false;
 
   constructor(options: DiscordSessionOptions) {
     this.client = options.client;
@@ -152,7 +161,17 @@ export class DiscordSession implements ChannelSession {
   async speak(audio: AudioData): Promise<void> {
     const connection = this.requireConnection();
     const payload = toDiscordPlayable(audio);
-    if (payload.length === 0) return;
+
+    // Skipping an empty clip silently made a TTS failure look like a working call in which the
+    // bot joined, said nothing, and listened. It is always an upstream bug; say so.
+    if (payload.length === 0) {
+      throw new Error('Discord session was asked to speak an empty audio clip; the text-to-speech step produced no audio.');
+    }
+
+    // Once Discord negotiates DAVE for the channel, frames sent before the MLS session is ready go
+    // out unencrypted and every other client discards them — the connection is Ready, playback
+    // runs to completion, and the human hears nothing. Wait for the handshake first.
+    await this.ensureE2eeReady(connection);
 
     const player = createAudioPlayer();
     const subscription = connection.subscribe(player);
@@ -279,6 +298,19 @@ export class DiscordSession implements ChannelSession {
 
     this.connection = connection;
     return connection;
+  }
+
+  /**
+   * Waits for end-to-end encryption to be usable, then returns. Never fails the call: if the
+   * handshake does not finish in time the frames are still sent (Discord may still downgrade the
+   * channel to v0), but the situation is logged because a silent call is otherwise invisible.
+   */
+  private async ensureE2eeReady(connection: VoiceConnection): Promise<void> {
+    const ready = await waitForE2eeReady(connection, E2EE_READY_TIMEOUT_MS);
+    if (ready || this.warnedE2eeNotReady) return;
+
+    this.warnedE2eeNotReady = true;
+    process.stderr.write(`${e2eeNotReadyMessage(describeE2ee(connection), E2EE_READY_TIMEOUT_MS)}\n`);
   }
 
   private requireConnection(): VoiceConnection {

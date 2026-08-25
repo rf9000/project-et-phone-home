@@ -1,4 +1,4 @@
-import { fetchWithRetry } from '../http.ts';
+import { SpeechApiError, fetchWithRetry } from '../http.ts';
 import type { AudioData, TextToSpeech } from '../../types/index.ts';
 
 const TTS_SAMPLE_RATE = 48000;
@@ -38,6 +38,15 @@ export class ElevenLabsTts implements TextToSpeech {
     );
 
     const arrayBuffer = await response.arrayBuffer();
+
+    // A 200 with no audio would otherwise flow all the way to a "successful" call in which the
+    // bot joins, says nothing, and listens — indistinguishable in the logs from a working one.
+    if (arrayBuffer.byteLength === 0) {
+      throw new SpeechApiError(
+        `Speech API returned status ${response.status} with an empty body for text-to-speech (voice ${this.cfg.voiceId}, model ${this.cfg.model}).`,
+        { status: response.status, body: '' },
+      );
+    }
 
     return {
       pcm: Buffer.from(arrayBuffer),

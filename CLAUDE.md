@@ -69,6 +69,12 @@ thin CLI (`et-phone-home ask "<question>"`) for non-TypeScript workflows.
   (`I heard: "<transcript>" — is that correct? Please answer yes or no.` and `Okay, please repeat
   your answer.`) that tests assert on directly — do not reword them without updating
   `tests/core/ask-human.test.ts`.
+- **Never play audio before DAVE end-to-end encryption is ready.** Once Discord negotiates DAVE
+  (protocol v1) for a channel, `@discordjs/voice` reports the connection Ready *before* the MLS
+  group has formed, and until then it sends opus frames in plaintext, which every other client
+  discards — playback runs Playing → Idle, the call reports a normal status, and the human hears
+  silence. `DiscordSession.speak()` waits via `src/channels/discord/dave.ts`; keep that guard in
+  front of any new playback path. `bun run scripts/playback-trace.ts` shows the handshake live.
 - **Job state is a wrapper, not a replacement.** The switchboard's `AskJob`/`JobState`
   (`queued -> calling -> done | expired | cancelled`) describe the job's place in the queue;
   `HumanResponse` — what a finished job's `result` field holds — is the exact same public
