@@ -12,10 +12,15 @@ export interface DnsOrderControl {
  *
  * Bun resolves IPv6-first by default, so on a network that advertises IPv6 without routing it,
  * every connection attempt hangs until the TCP timeout instead of failing fast — the Discord
- * voice websocket stalls for ~20 s and the call dies even though IPv4 to the same host works.
- * This is off by default because flipping the order unconditionally would break IPv6-only
- * networks in exactly the same way, and because a dead IPv6 route is a real fault worth seeing
- * rather than silently papering over.
+ * voice websocket takes ~21 s to open even though IPv4 to the same host connects instantly.
+ *
+ * Known limitation, measured: this reorders `node:dns` results (dns.lookup does return IPv4
+ * first afterwards), but Bun's native WebSocket and fetch do not consult that order — the voice
+ * websocket opened in an identical 21.2 s with and without it. It therefore helps only code that
+ * connects through node:net/node:dns, or when running under Node, where the `ws` package honours
+ * it. The voice path is made to survive the slow fallback by VOICE_READY_TIMEOUT_MS instead.
+ * Off by default because flipping the order unconditionally would break IPv6-only networks in
+ * exactly the same way.
  *
  * Returns whether the preference was actually applied, so the caller can say so out loud.
  */

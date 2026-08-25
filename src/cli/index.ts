@@ -4,6 +4,7 @@
 // everything else — usage, progress, diagnostics — goes to stderr.
 
 import dns from 'node:dns';
+import { text } from 'node:stream/consumers';
 import { askHuman } from '../core/ask-human.ts';
 import { buildDefaultDeps } from '../index.ts';
 import { resolveSettings } from '../settings/load.ts';
@@ -223,8 +224,10 @@ function usage(): string {
 }
 
 async function readQuestionFromStdin(): Promise<string> {
-  const text = await Bun.stdin.text();
-  return text.trim();
+  // node:stream/consumers rather than Bun.stdin so `ask` also runs under Node, which is the
+  // runtime that survives a network whose IPv6 does not route (see README, "Runtime notes").
+  const input = await text(process.stdin);
+  return input.trim();
 }
 
 function printResult(result: HumanResponse, parsed: ParsedArgs): 0 | 2 {
@@ -350,7 +353,7 @@ async function runServe(parsed: ParsedArgs): Promise<number> {
 }
 
 async function main(): Promise<number> {
-  const parsed = parseArgs(Bun.argv.slice(2));
+  const parsed = parseArgs(process.argv.slice(2));
 
   if (parsed.errors.length > 0) {
     for (const error of parsed.errors) {

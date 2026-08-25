@@ -11,8 +11,10 @@
 // Needs the same ETPH_DISCORD_* credentials as a real call. Nobody has to join the channel — the
 // bot connects on its own. Exits by itself after ~40 s. Nothing secret is printed.
 
+import dns from 'node:dns';
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { generateDependencyReport, joinVoiceChannel, VoiceConnectionStatus } from '@discordjs/voice';
+import { applyNetworkPreferences } from '../src/cli/network.ts';
 
 const token = process.env.ETPH_DISCORD_BOT_TOKEN;
 const guildId = process.env.ETPH_DISCORD_GUILD_ID;
@@ -33,7 +35,8 @@ const PHASES: Record<number, { name: string; meaning: string }> = {
     meaning:
       'the voice websocket never opened. The network is dropping traffic to the voice host — a ' +
       'firewall/VPN blocking *.discord.media, or IPv6 that is advertised but does not route ' +
-      '(try ETPH_PREFER_IPV4=true).',
+      '(Bun tries IPv6 first; ~21 s in this phase followed by an instant Ready is that fallback — ' +
+      'run scripts/ws-probe.ts to confirm).',
   },
   1: { name: 'Identifying', meaning: 'the websocket opened but Discord closed it during identify.' },
   2: {
@@ -48,6 +51,14 @@ const PHASES: Record<number, { name: string; meaning: string }> = {
 
 const phaseName = (code: unknown): string =>
   typeof code === 'number' && PHASES[code] !== undefined ? `${PHASES[code]!.name}(${code})` : String(code);
+
+// Trace the same path a real call takes, including the IPv4 preference if it is enabled.
+const preferIpv4 = process.env.ETPH_PREFER_IPV4 === 'true';
+if (applyNetworkPreferences({ preferIpv4 }, dns)) {
+  console.log('DNS: preferring IPv4 (ETPH_PREFER_IPV4=true)\n');
+} else {
+  console.log('DNS: default order (IPv6 first in Bun) — set ETPH_PREFER_IPV4=true to flip it\n');
+}
 
 console.log('--- @discordjs/voice dependency report ---');
 console.log(generateDependencyReport());
@@ -159,7 +170,8 @@ setTimeout(() => {
     console.log(`\nReachability check for the endpoint Discord assigned:`);
     console.log(`  Test-NetConnection ${host} -Port ${port ?? 443}      # PowerShell`);
     console.log(`  nc -vz ${host} ${port ?? 443}                        # macOS/Linux`);
-    console.log('  If IPv6 addresses fail and IPv4 succeeds, set ETPH_PREFER_IPV4=true.');
+    console.log('  If IPv6 addresses fail and IPv4 succeeds: ETPH_PREFER_IPV4 will NOT help under Bun (its native');
+    console.log('  WebSocket ignores the DNS order); run under Node 22 or disable IPv6 on the adapter.');
   }
 
   connection.destroy();

@@ -74,7 +74,7 @@ export const settingsSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'Resolve hosts to IPv4 before IPv6. Enable when a network advertises IPv6 that does not actually route, which stalls the Discord voice connection.',
+      'Order node:dns lookups IPv4 before IPv6. Only affects code that resolves through node:dns; under Bun the Discord voice websocket and fetch use native sockets that ignore this order, so it does not fix a voice connection stalled by non-routing IPv6.',
     ),
   server: z
     .object({

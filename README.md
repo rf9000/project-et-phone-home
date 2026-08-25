@@ -319,8 +319,14 @@ See the full design doc: [`docs/superpowers/specs/2026-08-05-et-phone-home-desig
   mismatch between what Bun reports and what the package's prebuilt binaries target) — the
   working opus path is `opusscript` (pure JS/WASM), which `prism-media`'s own loader falls back
   to automatically once it finds the native addon unusable.
-- **Node 22** runs the entire stack natively, including the native `@discordjs/opus` binary, as a
-  working fallback runtime if needed.
+- **Node 22** runs the library and the `ask` command natively, including the native
+  `@discordjs/opus` binary:
+  `node --experimental-transform-types --env-file=.env src/cli/index.ts ask "<question>"`
+  (`--experimental-transform-types`, not strip-only mode: the code uses constructor parameter
+  properties). The `serve` daemon is Bun-only — it is built on `Bun.serve`. Node matters on a
+  network whose IPv6 is advertised but does not route: Node's `ws` falls back to IPv4 in
+  milliseconds, while Bun's WebSocket waits out the OS connect timeout (measured: voice Ready in
+  0.5 s under Node vs. 21 s and a Discord `4006` under Bun, same machine, same minute).
 - No FFmpeg installation is required.
 
 ## Troubleshooting a failed call
@@ -330,7 +336,7 @@ the message plus its whole `cause` chain, printed to stderr by the CLI. Start th
 names the problem outright (an invalid ElevenLabs key, a voice the plan cannot use, a channel the
 bot was never invited to).
 
-**"voice connection … was not ready within 20000 ms"** is the one failure that is almost never
+**"voice connection … was not ready within 45000 ms"** is the one failure that is almost never
 about the bot. Login, the text ping, and ElevenLabs all run over ordinary HTTPS; the voice
 websocket connects to a `*.discord.media` host on its own port, so it is the single leg a
 restrictive or broken network breaks by itself. To find out which phase stalls:
@@ -343,16 +349,36 @@ It reports how long the handshake spent in each phase and what a stall there mea
 reachability check for the exact endpoint Discord assigned. Common causes:
 
 - **A firewall or VPN blocking `*.discord.media`** — the trace stalls in `OpeningWs`.
-- **IPv6 that is advertised but does not route.** Also stalls in `OpeningWs`: hosts resolve
-  IPv6-first, and packets are dropped rather than rejected, so each attempt hangs until the TCP
-  timeout even though IPv4 to the same host works. Set `ETPH_PREFER_IPV4=true` to resolve IPv4
-  first. It is off by default because flipping the order unconditionally would break IPv6-only
-  networks the same way, and because a dead IPv6 route is a real fault worth seeing.
+- **IPv6 that is advertised but does not route.** Also stalls in `OpeningWs`, for about 21 s on
+  Windows, and is then followed by an instant `Identifying → Ready`: Bun tries the IPv6 addresses
+  first, packets are dropped rather than rejected, and it only falls back to IPv4 once the OS
+  gives up on the TCP connect. `bun run scripts/ws-probe.ts` confirms it by connecting to every
+  resolved address per family. The 45 s ready timeout exists so this fallback still produces a
+  (slow) join instead of a failed call. `ETPH_PREFER_IPV4=true` does **not** fix it under Bun: it
+  reorders `node:dns` results, but Bun's native WebSocket ignores that order (measured: an
+  identical 21.2 s open with and without it, and the same again with Bun's own
+  `--dns-result-order=ipv4first` launch flag). What does work: run `ask` under Node 22, whose
+  `ws` falls back to IPv4 in milliseconds (see "Runtime notes"), or disable IPv6 on the adapter.
 - **Blocked outbound UDP** — the trace stalls in `UdpHandshaking`.
 - **A wedged voice session** — the trace never leaves `Signalling`; try a brand-new voice channel.
 
 Because the whole voice path depends on the network it runs on, a bot that works on one network
 can fail on another with no code change at all.
+
+**The bot joins, but you hear nothing** while the call itself reports a normal status
+(`no_speech`, or `answered` after you spoke blind). Two causes are ruled out or made loud by the
+code: text-to-speech returning no audio now fails the call with an explicit error instead of
+playing an empty clip, and playback waits for Discord's end-to-end voice encryption (DAVE) to be
+ready — until it is, `@discordjs/voice` sends frames unencrypted and other clients discard them.
+If it still happens, sit in the voice channel and run:
+
+```bash
+bun run scripts/playback-trace.ts        # three beeps; --tts speaks a sentence instead
+```
+
+It reports the DAVE protocol version, whether the encryption session was ready when it played,
+how many packets went out, and what each combination means. Check the bot's per-user volume in
+your Discord client (right-click the bot) before anything else.
 
 ## Testing
 

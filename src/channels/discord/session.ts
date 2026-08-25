@@ -17,6 +17,7 @@ import prism from 'prism-media';
 import type { AskRequest, AudioData, ChannelSession } from '../../types/index.ts';
 import { DISCORD_CHANNELS, DISCORD_SAMPLE_RATE, fromDiscordCapture, toDiscordPlayable } from './audio.ts';
 import {
+  VOICE_READY_TIMEOUT_MS,
   closeStream,
   formatRingMessage,
   isTargetUserInChannel,
@@ -24,8 +25,6 @@ import {
   voiceTimeoutMessage,
 } from './helpers.ts';
 
-/** How long the voice websocket/UDP handshake may take before we give up. */
-const VOICE_READY_TIMEOUT_MS = 20_000;
 /** How long the player may take to actually start emitting audio. */
 const PLAYBACK_START_TIMEOUT_MS = 5_000;
 /** Opus frame size for 20 ms of 48 kHz audio. */

@@ -163,11 +163,18 @@ describe('voiceTimeoutMessage', () => {
     const lower = message.toLowerCase();
     expect(lower).toContain('network');
     expect(lower).toContain('ipv6');
-    expect(message).toContain('ETPH_PREFER_IPV4');
   });
 
-  test('names the diagnostic script that identifies the stalling phase', () => {
+  // ETPH_PREFER_IPV4 only reorders node:dns results; Bun's native WebSocket (which the voice
+  // connection uses) ignores that order, measured at an identical 21 s open time either way.
+  // Recommending it here would send the reader to a knob that cannot help.
+  test('does not recommend the IPv4 preference, which does not reach the voice websocket', () => {
+    expect(message).not.toContain('ETPH_PREFER_IPV4');
+  });
+
+  test('names the diagnostic scripts that identify the stalling phase and address family', () => {
     expect(message).toContain('scripts/voice-trace.ts');
+    expect(message).toContain('scripts/ws-probe.ts');
   });
 
   test('is a single line so it stays readable in daemon logs and JSON output', () => {

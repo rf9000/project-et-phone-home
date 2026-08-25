@@ -9,6 +9,18 @@ export const DISCORD_PCM_BYTES_PER_MS = (DISCORD_SAMPLE_RATE * DISCORD_CHANNELS 
 export const PLAYBACK_SLACK_MS = 10_000;
 
 /**
+ * How long the voice websocket/UDP handshake may take before we give up.
+ *
+ * Not 20 s: on a network that advertises IPv6 without routing it, Bun's WebSocket tries the IPv6
+ * addresses first and only falls back to IPv4 after the OS gives up on the TCP connect — about
+ * 21 s on Windows. A 20 s limit failed those calls with ~1 s to spare while a 21.3 s handshake
+ * was about to succeed (measured with scripts/voice-trace.ts). The handshake itself, once the
+ * websocket is open, takes well under a second, so the extra headroom costs nothing on a healthy
+ * network and turns a failed call into a slow join on a broken one.
+ */
+export const VOICE_READY_TIMEOUT_MS = 45_000;
+
+/**
  * Minimal structural view of a discord.js `VoiceState`. Declared locally so these pure
  * helpers stay free of discord.js imports and remain trivially unit-testable.
  */
@@ -55,9 +67,10 @@ export function voiceTimeoutMessage(voiceChannelId: string, timeoutMs: number): 
     `Discord voice connection to channel ${voiceChannelId} was not ready within ${timeoutMs} ms. ` +
     'Everything else (login, text ping) uses HTTPS, so this usually means the network is blocking ' +
     'or black-holing the voice connection rather than anything being wrong with the bot: check for ' +
-    'a firewall/VPN blocking outbound traffic to *.discord.media, or broken IPv6 routing (set ' +
-    'ETPH_PREFER_IPV4=true to force IPv4). Run `bun run scripts/voice-trace.ts` to see which phase ' +
-    'stalls.'
+    'a firewall/VPN blocking outbound traffic to *.discord.media, or IPv6 that is advertised but ' +
+    'does not route (Bun tries IPv6 first and only falls back to IPv4 after the OS connect timeout). ' +
+    'Run `bun run scripts/voice-trace.ts` to see which phase stalls and `bun run scripts/ws-probe.ts` ' +
+    'to test each address family.'
   );
 }
 
