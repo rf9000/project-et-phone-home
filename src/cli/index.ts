@@ -3,7 +3,6 @@
 // instead of importing the library. stdout carries only the machine-readable answer (or JSON);
 // everything else — usage, progress, diagnostics — goes to stderr.
 
-import dns from 'node:dns';
 import { text } from 'node:stream/consumers';
 import { askHuman } from '../core/ask-human.ts';
 import { buildDefaultDeps } from '../index.ts';
@@ -12,7 +11,6 @@ import { settingsFields } from '../settings/schema.ts';
 import { startSwitchboard } from '../server/http.ts';
 import { SwitchboardClient, SwitchboardJobEndedError } from '../server/client.ts';
 import { makeDefaultRunAsk } from '../server/run-ask.ts';
-import { applyNetworkPreferences } from './network.ts';
 import type { AskJobRequest } from '../server/queue.ts';
 import type { AskOptions } from '../core/ask-human.ts';
 import type { Settings, SettingsField } from '../settings/schema.ts';
@@ -292,10 +290,6 @@ async function runAsk(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
 
-  if (applyNetworkPreferences(settings, dns)) {
-    process.stderr.write('Preferring IPv4 addresses (settings.preferIpv4).\n');
-  }
-
   const deps = buildDefaultDeps(settings);
   const opts: AskOptions | undefined =
     parsed.timeoutSeconds !== undefined ? { joinTimeoutMs: parsed.timeoutSeconds * 1000 } : undefined;
@@ -318,10 +312,6 @@ async function runServe(parsed: ParsedArgs): Promise<number> {
   } catch (error) {
     process.stderr.write(`${(error as Error).message}\n`);
     return 1;
-  }
-
-  if (applyNetworkPreferences(settings, dns)) {
-    process.stderr.write('Preferring IPv4 addresses (settings.preferIpv4).\n');
   }
 
   // A daemon whose terminal says nothing about the calls it places is undiagnosable, so wrap the

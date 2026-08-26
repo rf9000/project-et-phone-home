@@ -70,12 +70,6 @@ export const settingsSchema = z.object({
     .literal('discord')
     .default('discord')
     .describe('Communication channel to use for asking the human. Currently only "discord" is supported.'),
-  preferIpv4: z
-    .boolean()
-    .default(false)
-    .describe(
-      'Order node:dns lookups IPv4 before IPv6. Only affects code that resolves through node:dns; under Bun the Discord voice websocket and fetch use native sockets that ignore this order, so it does not fix a voice connection stalled by non-routing IPv6.',
-    ),
   server: z
     .object({
       host: z

@@ -354,11 +354,12 @@ reachability check for the exact endpoint Discord assigned. Common causes:
   first, packets are dropped rather than rejected, and it only falls back to IPv4 once the OS
   gives up on the TCP connect. `bun run scripts/ws-probe.ts` confirms it by connecting to every
   resolved address per family. The 45 s ready timeout exists so this fallback still produces a
-  (slow) join instead of a failed call. `ETPH_PREFER_IPV4=true` does **not** fix it under Bun: it
-  reorders `node:dns` results, but Bun's native WebSocket ignores that order (measured: an
-  identical 21.2 s open with and without it, and the same again with Bun's own
-  `--dns-result-order=ipv4first` launch flag). What does work: run `ask` under Node 22, whose
-  `ws` falls back to IPv4 in milliseconds (see "Runtime notes"), or disable IPv6 on the adapter.
+  (slow) join instead of a failed call — but only when Discord accepts the late identify; often
+  it answers with close code `4006` instead, and the retry stalls another 21 s. There is no
+  setting for this because none can work: reordering DNS results (`dns.setDefaultResultOrder`,
+  Bun's `--dns-result-order=ipv4first`) was measured at an identical 21.2 s open, since Bun's
+  native WebSocket ignores the order. What does work: run `ask` under Node 22, whose `ws` falls
+  back to IPv4 in milliseconds (see "Runtime notes"), or disable IPv6 on the adapter.
 - **Blocked outbound UDP** — the trace stalls in `UdpHandshaking`.
 - **A wedged voice session** — the trace never leaves `Signalling`; try a brand-new voice channel.
 

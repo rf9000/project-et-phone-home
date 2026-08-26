@@ -165,10 +165,10 @@ describe('voiceTimeoutMessage', () => {
     expect(lower).toContain('ipv6');
   });
 
-  // ETPH_PREFER_IPV4 only reorders node:dns results; Bun's native WebSocket (which the voice
-  // connection uses) ignores that order, measured at an identical 21 s open time either way.
-  // Recommending it here would send the reader to a knob that cannot help.
-  test('does not recommend the IPv4 preference, which does not reach the voice websocket', () => {
+  // A former ETPH_PREFER_IPV4 setting only reordered node:dns results; Bun's native WebSocket
+  // (which the voice connection uses) ignores that order, measured at an identical 21 s open time
+  // either way, so the setting was removed. This guards against the advice creeping back in.
+  test('does not recommend a DNS-order knob, which does not reach the voice websocket', () => {
     expect(message).not.toContain('ETPH_PREFER_IPV4');
   });
 

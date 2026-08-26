@@ -148,8 +148,8 @@ if (wsOpened) {
 } else if (ipv4Works && !ipv6Works) {
   console.log('TCP to IPv4 connects; every IPv6 address hangs or fails.');
   console.log('This network advertises IPv6 that does not route, and Bun tries IPv6 first.');
-  console.log('ETPH_PREFER_IPV4 steers node:dns but NOT Bun\'s native fetch/WebSocket, so it');
-  console.log('cannot fix this on its own. Options:');
+  console.log('Bun\'s native fetch/WebSocket ignore DNS result order (dns.setDefaultResultOrder and');
+  console.log('--dns-result-order both measured as no-ops here), so it cannot be steered from code. Options:');
   console.log('  - disable IPv6 on the adapter (admin):');
   console.log('      Disable-NetAdapterBinding -Name "Wi-Fi" -ComponentID ms_tcpip6');
   console.log('  - or run under Node 22, which falls back to IPv4 on its own (Happy Eyeballs).');
